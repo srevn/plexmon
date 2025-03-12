@@ -1,0 +1,28 @@
+# Sample configuration file for plexmon
+# Copy this file to /usr/local/etc/plexmon.conf and edit as needed
+
+# Plex server URL (default: http://localhost:32400)
+plex_url=http://localhost:32400
+
+# Plex authentication token
+# Find this in your Plex Media Server URL when logged in
+plex_token=YOUR_PLEX_TOKEN_HERE
+
+# Minimum time between scans of the same directory (in seconds)
+scan_interval=10
+
+# Run in verbose mode (true/false)
+verbose=true
+
+# Run as daemon (true/false)
+daemonize=false
+
+# Log file path (only used when running as daemon)
+log_file=/var/log/plexmon.log
+
+# PID file path (only used when running as daemon)
+pid_file=/var/run/plexmon.pid
+
+# Additional directories to monitor (optional)
+# directory1=/path/to/additional/directory
+# directory2=/path/to/another/directory

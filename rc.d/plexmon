@@ -1,0 +1,36 @@
+#!/bin/sh
+#
+# PROVIDE: plexmon
+# REQUIRE: NETWORKING plexmediaserver
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="plexmon"
+rcvar="plexmon_enable"
+
+load_rc_config $name
+
+: ${plexmon_enable:="NO"}
+: ${plexmon_user:="plex"}
+: ${plexmon_group:="plex"}
+
+pidfile="/var/run/${name}.pid"
+logfile="/var/log/${name}.log"
+
+command="/usr/local/bin/plexmon"
+
+start_precmd="${name}_precmd"
+
+plexmon_precmd()
+{
+	if [ ! -f ${logfile} ]; then
+		install -m 640 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${logfile}
+	fi
+	
+	if [ ! -f ${pidfile} ]; then
+		install -m 644 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${pidfile}
+	fi
+}
+
+run_rc_command "$1"
