@@ -11,6 +11,11 @@ plex_token=YOUR_PLEX_TOKEN_HERE
 # Minimum time between scans of the same directory (in seconds)
 scan_interval=10
 
+# Log level (info or debug)
+# debug - Show all messages (most verbose)
+# info - Show normal information, warnings and errors (default)
+log_level=info
+
 # Run in verbose mode (true/false)
 verbose=true
 

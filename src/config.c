@@ -69,9 +69,10 @@ bool config_load(const char *config_path) {
                 g_config.log_file[PATH_MAX_LEN - 1] = '\0';
             }
             else if (strcmp(k, "log_level") == 0) {
-                int level = atoi(value);
-                if (level >= LOG_EMERG && level <= LOG_DEBUG) {
-                    g_config.log_level = level;
+                if (strcasecmp(value, "debug") == 0) {
+                    g_config.log_level = LOG_DEBUG;
+                } else if (strcasecmp(value, "info") == 0) {
+                    g_config.log_level = LOG_INFO;
                 } else {
                     log_message(LOG_WARNING, "Invalid log_level (%s), using default", value);
                 }
