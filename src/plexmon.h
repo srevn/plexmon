@@ -44,9 +44,9 @@
 
 /* Structure to hold a monitored directory */
 typedef struct {
-    int fd;                 /* File descriptor */
+    int fd;                   /* File descriptor */
     char path[PATH_MAX_LEN];  /* Path to the directory */
-    int plex_section_id;    /* Associated Plex library section ID */
+    int plex_section_id;      /* Associated Plex library section ID */
 } monitored_dir_t;
 
 /* Structure to hold configuration */
@@ -54,12 +54,13 @@ typedef struct {
     char plex_url[PATH_MAX_LEN];
     char plex_token[TOKEN_MAX_LEN];
     char *directories[MAX_EVENT_FDS];  /* List of directories to monitor */
-    int num_directories;
-    int scan_interval;      /* Minimum seconds between scans of the same directory */
-    bool verbose;           /* Verbose output flag */
-    bool daemonize;         /* Run as daemon */
     char log_file[PATH_MAX_LEN];
     char pid_file[PATH_MAX_LEN];
+    int num_directories;
+    int scan_interval;      /* Minimum seconds between scans of the same directory */
+    int log_level;          /* Log level threshold */
+    bool verbose;           /* Verbose output flag */
+    bool daemonize;         /* Run as daemon */
 } config_t;
 
 /* Global configuration */

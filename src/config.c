@@ -68,6 +68,14 @@ bool config_load(const char *config_path) {
                 strncpy(g_config.log_file, value, PATH_MAX_LEN - 1);
                 g_config.log_file[PATH_MAX_LEN - 1] = '\0';
             }
+            else if (strcmp(k, "log_level") == 0) {
+                int level = atoi(value);
+                if (level >= LOG_EMERG && level <= LOG_DEBUG) {
+                    g_config.log_level = level;
+                } else {
+                    log_message(LOG_WARNING, "Invalid log_level (%s), using default", value);
+                }
+            }
             else if (strncmp(k, "directory", 9) == 0) {
                 if (g_config.num_directories < MAX_EVENT_FDS) {
                     g_config.directories[g_config.num_directories] = strdup(value);

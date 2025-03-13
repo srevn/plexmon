@@ -72,6 +72,7 @@ int main(int argc, char *argv[]) {
     g_config.scan_interval = 10;
     g_config.verbose = false;
     g_config.daemonize = false;
+    g_config.log_level = DEFAULT_LOG_LEVEL;
     
     /* Parse command line options */
     while ((opt = getopt(argc, argv, "c:vdh")) != -1) {
@@ -307,6 +308,11 @@ static void cleanup(void) {
  * Log message to file and/or stdout
  */
 void log_message(int priority, const char *format, ...) {
+    /* Skip messages with priority lower than configured level */
+    if (priority > g_config.log_level) {
+        return;
+    }
+    
     va_list ap;
     time_t now;
     struct tm *timeinfo;
