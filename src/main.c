@@ -69,6 +69,7 @@ int main(int argc, char *argv[]) {
     strcpy(g_config.plex_url, DEFAULT_PLEX_URL);
     strcpy(g_config.log_file, DEFAULT_LOG_FILE);
     g_config.scan_interval = 10;
+    g_config.startup_timeout = 60;
     g_config.verbose = false;
     g_config.daemonize = false;
     g_config.log_level = DEFAULT_LOG_LEVEL;
@@ -121,6 +122,12 @@ int main(int argc, char *argv[]) {
     signal(SIGHUP, signal_handler);
     signal(SIGTERM, signal_handler);
     
+    /* Plex connection timeout */
+    time_t start_time = time(NULL);
+    time_t current_time;
+    bool connected = false;
+    int retry_count = 0;
+    
     /* Initialize components */
     if (!plexapi_init()) {
         log_message(LOG_ERR, "Failed to initialize Plex API client");
@@ -142,6 +149,27 @@ int main(int argc, char *argv[]) {
     }
     
     /* Get libraries from Plex */
+    log_message(LOG_INFO, "Attempting to connect to Plex Media Server...");
+    
+    while (!connected) {
+        if (plexapi_get_libraries()) {
+            connected = true;
+            log_message(LOG_INFO, "Successfully connected to Plex Media Server");
+            break;
+        }
+        
+        retry_count++;
+        current_time = time(NULL);
+    
+        if (current_time - start_time >= g_config.startup_timeout) {
+            log_message(LOG_ERR, "Timeout reached after %d seconds. Exiting.", g_config.startup_timeout);
+            cleanup();
+            return EXIT_FAILURE;
+        }
+        
+        sleep(5);
+    }
+    
     if (!plexapi_get_libraries()) {
         log_message(LOG_ERR, "Failed to get library directories from Plex");
         cleanup();
@@ -175,6 +203,7 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  -c FILE    Path to configuration file (default: %s)\n", DEFAULT_CONFIG_FILE);
     fprintf(stderr, "  -v         Verbose mode\n");
     fprintf(stderr, "  -d         Run as daemon\n");
+    fprintf(stderr, "  -t SECONDS Startup timeout in seconds (default: 60)\n");
     fprintf(stderr, "  -h         Show this help message\n");
 }
 

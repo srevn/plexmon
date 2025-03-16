@@ -54,6 +54,7 @@ typedef struct {
     char plex_token[TOKEN_MAX_LEN];
     char *directories[MAX_EVENT_FDS];  /* List of directories to monitor */
     char log_file[PATH_MAX_LEN];
+    int startup_timeout;     /* Maximum time to wait for Plex in seconds */
     int num_directories;
     int scan_interval;      /* Minimum seconds between scans of the same directory */
     int log_level;          /* Log level threshold */
