@@ -51,11 +51,11 @@ bool config_load(const char *config_path) {
                 strncpy(g_config.plex_token, value, TOKEN_MAX_LEN - 1);
                 g_config.plex_token[TOKEN_MAX_LEN - 1] = '\0';
             }
-            else if (strcmp(k, "scan_interval") == 0) {
-                g_config.scan_interval = atoi(value);
-            }
             else if (strcmp(k, "startup_timeout") == 0) {
                 g_config.startup_timeout = atoi(value);
+            }
+            else if (strcmp(k, "scan_interval") == 0) {
+                g_config.scan_interval = atoi(value);
             }
             else if (strcmp(k, "verbose") == 0) {
                 g_config.verbose = (strcmp(value, "true") == 0 || 
@@ -102,16 +102,16 @@ bool config_load(const char *config_path) {
         log_message(LOG_WARNING, "No Plex token provided in configuration");
     }
     
-    if (g_config.scan_interval < 1) {
-        log_message(LOG_WARNING, "Invalid scan_interval (%d), using default of 10s", 
-                    g_config.scan_interval);
-        g_config.scan_interval = 10;
-    }
-    
     if (g_config.startup_timeout <= 0) {
         log_message(LOG_WARNING, "Invalid startup_timeout (%d), using default of 60s", 
                     g_config.startup_timeout);
         g_config.startup_timeout = 60;
+    }
+    
+    if (g_config.scan_interval < 1) {
+        log_message(LOG_WARNING, "Invalid scan_interval (%d), using default of 10s", 
+                    g_config.scan_interval);
+        g_config.scan_interval = 10;
     }
     
     return true;

@@ -8,11 +8,11 @@ plex_url=http://localhost:32400
 # Find this in your Plex Media Server URL when logged in
 plex_token=YOUR_PLEX_TOKEN_HERE
 
-# Minimum time between scans of the same directory (in seconds)
-scan_interval=10
-
 # Maximum time to wait for Plex server at startup (in seconds)
 startup_timeout=60
+
+# Minimum time between scans of the same directory (in seconds)
+scan_interval=10
 
 # Log level (info or debug)
 # debug - Show all messages (most verbose)
