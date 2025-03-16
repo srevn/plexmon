@@ -311,10 +311,13 @@ void fsmonitor_process_events(void) {
                 }
             }
             
-            /* Trigger Plex scan */
+            /* Queue event */
             events_handle(md->path, md->plex_section_id);
         }
     }
+    
+    /* Process any pending scans that are ready */
+    events_process_pending();
 }
 
 /* Recursively add a directory and its subdirectories to the watch list */

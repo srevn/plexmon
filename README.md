@@ -50,8 +50,8 @@ plex_url=http://localhost:32400
 # Plex authentication token
 plex_token=YOUR_PLEX_TOKEN_HERE
 
-# Minimum time between scans of the same directory (in seconds)
-scan_interval=10
+# Maximum time to wait for Plex server at startup (in seconds)
+startup_timeout=60
 
 # Log level (info or debug)
 log_level=info

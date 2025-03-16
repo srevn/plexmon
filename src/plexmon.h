@@ -56,7 +56,6 @@ typedef struct {
     char log_file[PATH_MAX_LEN];
     int startup_timeout;     /* Maximum time to wait for Plex in seconds */
     int num_directories;
-    int scan_interval;      /* Minimum seconds between scans of the same directory */
     int log_level;          /* Log level threshold */
     bool verbose;           /* Verbose output flag */
     bool daemonize;         /* Run as daemon */
@@ -97,6 +96,7 @@ bool plexapi_trigger_scan(const char *path, int section_id);
 bool events_init(void);
 void events_cleanup(void);
 void events_handle(const char *path, int section_id);
+void events_process_pending(void);
 
 /* Logging */
 bool log_init(void);

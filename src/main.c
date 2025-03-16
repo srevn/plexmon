@@ -68,7 +68,6 @@ int main(int argc, char *argv[]) {
     memset(&g_config, 0, sizeof(g_config));
     strcpy(g_config.plex_url, DEFAULT_PLEX_URL);
     strcpy(g_config.log_file, DEFAULT_LOG_FILE);
-    g_config.scan_interval = 10;
     g_config.startup_timeout = 60;
     g_config.verbose = false;
     g_config.daemonize = false;
