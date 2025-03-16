@@ -15,16 +15,33 @@ load_rc_config $name
 : ${plexmon_user:="plex"}
 : ${plexmon_group:="plex"}
 
+pidfile="/var/run/${name}.pid"
 logfile="/var/log/${name}.log"
 
 command="/usr/local/bin/plexmon"
 
 start_precmd="${name}_precmd"
+reload_cmd="${name}_reload"
 
 plexmon_precmd()
 {
 	if [ ! -f ${logfile} ]; then
 		install -m 640 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${logfile}
+	fi
+	
+	if [ ! -f ${pidfile} ]; then
+		install -m 644 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${pidfile}
+	fi
+}
+
+plexmon_reload()
+{
+	echo "Reloading ${name} configuration."
+	if [ -f ${pidfile} ]; then
+		kill -HUP $(cat ${pidfile})
+	else
+		warn "${name} is not running."
+		return 1
 	fi
 }
 
