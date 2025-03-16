@@ -126,7 +126,6 @@ int main(int argc, char *argv[]) {
     time_t start_time = time(NULL);
     time_t current_time;
     bool connected = false;
-    int retry_count = 0;
     
     /* Initialize components */
     if (!plexapi_init()) {
@@ -158,9 +157,8 @@ int main(int argc, char *argv[]) {
             break;
         }
         
-        retry_count++;
         current_time = time(NULL);
-    
+        
         if (current_time - start_time >= g_config.startup_timeout) {
             log_message(LOG_ERR, "Timeout reached after %d seconds. Exiting.", g_config.startup_timeout);
             cleanup();
