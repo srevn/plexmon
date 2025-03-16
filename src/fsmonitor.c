@@ -11,6 +11,89 @@ static int num_monitored_dirs = 0;
 /* Global kqueue descriptor */
 static int g_kqueue_fd = -1;
 
+/* Structure to represent a directory queue node */
+typedef struct dir_queue_node {
+    char path[PATH_MAX_LEN];
+    struct dir_queue_node *next;
+} dir_queue_node_t;
+
+/* Structure for a FIFO queue */
+typedef struct {
+    dir_queue_node_t *front;
+    dir_queue_node_t *rear;
+} dir_queue_t;
+
+/* Initialize an empty queue */
+static void queue_init(dir_queue_t *queue) {
+    queue->front = NULL;
+    queue->rear = NULL;
+}
+
+/* Add an item to the queue (enqueue) */
+static bool queue_enqueue(dir_queue_t *queue, const char *path) {
+    dir_queue_node_t *new_node = malloc(sizeof(dir_queue_node_t));
+    if (!new_node) {
+        return false;
+    }
+    
+    strncpy(new_node->path, path, PATH_MAX_LEN - 1);
+    new_node->path[PATH_MAX_LEN - 1] = '\0';
+    new_node->next = NULL;
+    
+    if (queue->rear == NULL) {
+        /* Empty queue */
+        queue->front = new_node;
+        queue->rear = new_node;
+    } else {
+        /* Add to the end */
+        queue->rear->next = new_node;
+        queue->rear = new_node;
+    }
+    
+    return true;
+}
+
+/* Remove an item from the queue (dequeue) */
+static bool queue_dequeue(dir_queue_t *queue, char *path) {
+    if (queue->front == NULL) {
+        return false;
+    }
+    
+    dir_queue_node_t *temp = queue->front;
+    
+    strncpy(path, temp->path, PATH_MAX_LEN - 1);
+    path[PATH_MAX_LEN - 1] = '\0';
+    
+    queue->front = queue->front->next;
+    
+    if (queue->front == NULL) {
+        queue->rear = NULL;
+    }
+    
+    free(temp);
+    return true;
+}
+
+/* Free all nodes in the queue */
+static void queue_free(dir_queue_t *queue) {
+    dir_queue_node_t *current, *next;
+    
+    current = queue->front;
+    while (current) {
+        next = current->next;
+        free(current);
+        current = next;
+    }
+    
+    queue->front = NULL;
+    queue->rear = NULL;
+}
+
+/* Check if queue is empty */
+static bool queue_is_empty(dir_queue_t *queue) {
+    return queue->front == NULL;
+}
+
 /* Initialize file system monitoring */
 bool fsmonitor_init(void) {
     log_message(LOG_INFO, "Initializing file system monitoring");
@@ -168,38 +251,73 @@ void fsmonitor_process_events(int kq) {
 
 /* Recursively add a directory and its subdirectories to the watch list */
 bool add_watch_recursive(int kq, const char *dir_path, int section_id) {
+    dir_queue_t queue;
+    char current_path[PATH_MAX_LEN];
     DIR *dir;
     struct dirent *entry;
     char path[PATH_MAX_LEN];
+    bool success = true;
     
-    if (!(dir = opendir(dir_path))) {
-        log_message(LOG_ERR, "Failed to open directory %s: %s", dir_path, strerror(errno));
+    /* Initialize queue */
+    queue_init(&queue);
+    
+    /* Start with the initial directory */
+    if (!queue_enqueue(&queue, dir_path)) {
+        log_message(LOG_ERR, "Failed to allocate memory for directory queue");
         return false;
     }
     
-    /* Add this directory to monitoring */
-    int dir_idx = fsmonitor_add_directory(dir_path, section_id);
-    if (dir_idx < 0) {
+    /* Process directories from the queue */
+    while (!queue_is_empty(&queue)) {
+        if (!queue_dequeue(&queue, current_path)) {
+            break;  /* Should not happen */
+        }
+        
+        /* Open current directory */
+        if (!(dir = opendir(current_path))) {
+            log_message(LOG_ERR, "Failed to open directory %s: %s", current_path, strerror(errno));
+            continue; /* Skip this directory but continue with others */
+        }
+        
+        /* Add current directory to monitoring */
+        int dir_idx = fsmonitor_add_directory(current_path, section_id);
+        if (dir_idx < 0) {
+            log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+            closedir(dir);
+            continue; /* Skip this directory but continue with others */
+        }
+        
+        /* Process all entries in current directory */
+        while ((entry = readdir(dir))) {
+            /* Skip . and .. */
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            
+            snprintf(path, sizeof(path), "%s/%s", current_path, entry->d_name);
+            
+            /* If it's a directory, add to queue */
+            if (is_directory(path)) {
+                if (!queue_enqueue(&queue, path)) {
+                    log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+                    success = false;
+                    break;
+                }
+            }
+        }
+        
         closedir(dir);
-        return false;
-    }
-    
-    /* Recursively process subdirectories */
-    while ((entry = readdir(dir))) {
-        /* Skip . and .. */
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
         
-        snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
-        
-        if (is_directory(path)) {
-            add_watch_recursive(kq, path, section_id);
+        /* If we had a memory allocation error, break out of the loop */
+        if (!success) {
+            break;
         }
     }
     
-    closedir(dir);
-    return true;
+    /* Clean up any remaining queue entries */
+    queue_free(&queue);
+    
+    return success;
 }
 
 /* Check if a path is a directory */
