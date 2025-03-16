@@ -80,7 +80,7 @@ void config_free(void);
 /* Filesystem monitoring */
 bool fsmonitor_init(void);
 bool fsmonitor_run_loop(void);
-void fsmonitor_process_events(int kq);
+void fsmonitor_process_events(void);
 void fsmonitor_cleanup(void);
 int fsmonitor_get_kqueue_fd(void);
 int fsmonitor_add_directory(const char *path, int plex_section_id);
@@ -104,6 +104,6 @@ void log_message(int priority, const char *format, ...);
 
 /* Utilities */
 bool is_directory(const char *path);
-bool add_watch_recursive(int kq, const char *dir_path, int section_id);
+bool add_watch_recursive(const char *dir_path, int section_id);
 
 #endif /* PLEXMON_H */

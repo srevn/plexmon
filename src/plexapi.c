@@ -75,7 +75,6 @@ bool plexapi_get_libraries(void) {
     int num_sections, section_id;
     json_object *location_array, *location, *path_obj;
     const char *section_path;
-    int kq;
     
     log_message(LOG_INFO, "Retrieving library sections from Plex");
     
@@ -84,9 +83,8 @@ bool plexapi_get_libraries(void) {
         return false;
     }
     
-    /* Get kqueue descriptor */
-    kq = fsmonitor_get_kqueue_fd();
-    if (kq == -1) {
+    /* Check if kqueue is valid */
+    if (fsmonitor_get_kqueue_fd() == -1) {
         log_message(LOG_ERR, "Invalid kqueue descriptor");
         return false;
     }
@@ -119,7 +117,6 @@ bool plexapi_get_libraries(void) {
     if (res != CURLE_OK) {
         log_message(LOG_ERR, "Failed to get library sections: %s", curl_easy_strerror(res));
         free(response.data);
-        close(kq);
         return false;
     }
     
@@ -128,7 +125,6 @@ bool plexapi_get_libraries(void) {
     if (!root) {
         log_message(LOG_ERR, "Failed to parse JSON response");
         free(response.data);
-        close(kq);
         return false;
     }
     
@@ -138,7 +134,6 @@ bool plexapi_get_libraries(void) {
         log_message(LOG_ERR, "Invalid JSON response structure");
         json_object_put(root);
         free(response.data);
-        close(kq);
         return false;
     }
     
@@ -164,7 +159,7 @@ bool plexapi_get_libraries(void) {
                     /* Add this directory to the watch list */
                     log_message(LOG_INFO, "Monitoring library: %s (section %d)", section_path, section_id);
                     
-                    if (!add_watch_recursive(kq, section_path, section_id)) {
+                    if (!add_watch_recursive(section_path, section_id)) {
                         log_message(LOG_WARNING, "Failed to add directory %s to watch list", section_path);
                     }
                 }

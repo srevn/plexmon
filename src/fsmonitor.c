@@ -206,7 +206,7 @@ int fsmonitor_add_directory(const char *path, int plex_section_id) {
 }
 
 /* Process events from kqueue */
-void fsmonitor_process_events(int kq) {
+void fsmonitor_process_events(void) {
     struct kevent events[MAX_EVENT_FDS];
     int nev;
     
@@ -214,7 +214,7 @@ void fsmonitor_process_events(int kq) {
     timeout.tv_sec = 1;  /* 1 second timeout */
     timeout.tv_nsec = 0;
     
-    nev = kevent(kq, NULL, 0, events, MAX_EVENT_FDS, &timeout);
+    nev = kevent(g_kqueue_fd, NULL, 0, events, MAX_EVENT_FDS, &timeout);
     
     if (nev == -1) {
         if (errno != EINTR) {
@@ -239,7 +239,7 @@ void fsmonitor_process_events(int kq) {
                 
                 /* Check for new subdirectories that need to be monitored */
                 if (is_directory(md->path)) {
-                    add_watch_recursive(g_kqueue_fd, md->path, md->plex_section_id);
+                    add_watch_recursive(md->path, md->plex_section_id);
                 }
             }
             
@@ -250,7 +250,7 @@ void fsmonitor_process_events(int kq) {
 }
 
 /* Recursively add a directory and its subdirectories to the watch list */
-bool add_watch_recursive(int kq, const char *dir_path, int section_id) {
+bool add_watch_recursive(const char *dir_path, int section_id) {
     dir_queue_t queue;
     char current_path[PATH_MAX_LEN];
     DIR *dir;
@@ -341,7 +341,7 @@ bool fsmonitor_run_loop(void) {
     
     /* Process events as long as g_running is true */
     while (g_running) {
-        fsmonitor_process_events(g_kqueue_fd);
+        fsmonitor_process_events();
     }
     
     return true;
