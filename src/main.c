@@ -153,7 +153,6 @@ int main(int argc, char *argv[]) {
     while (!connected) {
         if (plexapi_get_libraries()) {
             connected = true;
-            log_message(LOG_INFO, "Successfully connected to Plex Media Server");
             break;
         }
         
