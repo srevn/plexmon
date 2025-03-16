@@ -187,11 +187,11 @@ static void signal_handler(int sig) {
         case SIGINT:
         case SIGTERM:
             log_message(LOG_INFO, "Received signal %d, shutting down", sig);
-            g_running = 0;
+            fsmonitor_signal_exit();  /* Signal exit through kqueue */
             break;
         case SIGHUP:
             log_message(LOG_INFO, "Received SIGHUP, reloading configuration");
-            config_load(DEFAULT_CONFIG_FILE);
+            fsmonitor_signal_reload();  /* Signal reload through kqueue */
             break;
     }
 }

@@ -11,6 +11,11 @@ static int num_monitored_dirs = 0;
 /* Global kqueue descriptor */
 static int g_kqueue_fd = -1;
 
+/* User event identifiers */
+#define USER_EVENT_EXIT    1
+#define USER_EVENT_RELOAD  2
+static uintptr_t g_user_event_ident = 0;
+
 /* Structure to represent a directory queue node */
 typedef struct dir_queue_node {
     char path[PATH_MAX_LEN];
@@ -112,6 +117,18 @@ bool fsmonitor_init(void) {
         return false;
     }
     
+    /* Set up user event for clean wake-up */
+    struct kevent kev;
+    g_user_event_ident = getpid();  /* Use PID as the identifier */
+    
+    EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+        log_message(LOG_ERR, "Failed to register user event: %s", strerror(errno));
+        close(g_kqueue_fd);
+        g_kqueue_fd = -1;
+        return false;
+    }
+    
     log_message(LOG_INFO, "Kqueue created successfully with descriptor %d", g_kqueue_fd);
     return true;
 }
@@ -135,6 +152,42 @@ void fsmonitor_cleanup(void) {
     }
     
     num_monitored_dirs = 0;
+}
+
+/* Signal to the event loop to exit */
+void fsmonitor_signal_exit(void) {
+    struct kevent kev;
+    
+    if (g_kqueue_fd == -1) {
+        return;
+    }
+    
+    log_message(LOG_INFO, "Sending exit signal to event loop");
+    
+    /* Set up and trigger the user event for exit */
+    EV_SET(&kev, g_user_event_ident, EVFILT_USER, 0, NOTE_TRIGGER | USER_EVENT_EXIT, 0, NULL);
+    
+    if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+        log_message(LOG_ERR, "Failed to signal exit event: %s", strerror(errno));
+    }
+}
+
+/* Signal to the event loop to reload configuration */
+void fsmonitor_signal_reload(void) {
+    struct kevent kev;
+    
+    if (g_kqueue_fd == -1) {
+        return;
+    }
+    
+    log_message(LOG_INFO, "Sending reload signal to event loop");
+    
+    /* Set up and trigger the user event for reload */
+    EV_SET(&kev, g_user_event_ident, EVFILT_USER, 0, NOTE_TRIGGER | USER_EVENT_RELOAD, 0, NULL);
+    
+    if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+        log_message(LOG_ERR, "Failed to signal reload event: %s", strerror(errno));
+    }
 }
 
 /* Return the current count of monitored directories */
@@ -225,6 +278,21 @@ void fsmonitor_process_events(void) {
     
     /* Process received events */
     for (int i = 0; i < nev; i++) {
+        /* Check for user events */
+        if (events[i].filter == EVFILT_USER && events[i].ident == g_user_event_ident) {
+            uint32_t fflags = events[i].fflags;
+            
+            if (fflags & USER_EVENT_EXIT) {
+                g_running = 0;  /* Signal to exit the main loop */
+                log_message(LOG_INFO, "Received exit event");
+            } else if (fflags & USER_EVENT_RELOAD) {
+                log_message(LOG_INFO, "Received reload event, reloading configuration");
+                config_load(DEFAULT_CONFIG_FILE);
+            }
+            
+            continue;
+        }
+        
         monitored_dir_t *md = (monitored_dir_t *)events[i].udata;
         
         if (events[i].flags & EV_ERROR) {
@@ -339,7 +407,8 @@ bool fsmonitor_run_loop(void) {
         return false;
     }
     
-    /* Process events as long as g_running is true */
+    /* Process events until g_running becomes false */
+    g_running = 1;
     while (g_running) {
         fsmonitor_process_events();
     }
