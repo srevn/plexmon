@@ -168,12 +168,6 @@ int main(int argc, char *argv[]) {
         sleep(5);
     }
     
-    if (!plexapi_get_libraries()) {
-        log_message(LOG_ERR, "Failed to get library directories from Plex");
-        cleanup();
-        return EXIT_FAILURE;
-    }
-    
     log_message(LOG_INFO, "Monitoring %d directories for changes", get_monitored_dir_count());
     
     /* Main event loop */
