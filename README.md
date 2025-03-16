@@ -2,10 +2,6 @@
 
 A FreeBSD application that monitors filesystem changes in Plex Media Server library directories and triggers partial library scans.
 
-## Overview
-
-plexmon is designed to run as a system service that automatically monitors the directories used by your Plex Media Server libraries. When file changes are detected, it uses the Plex API to trigger a partial scan of only the affected directories, which is more efficient than full library scans.
-
 ## Features
 
 - Real-time monitoring of Plex library directories using FreeBSD's kqueue
