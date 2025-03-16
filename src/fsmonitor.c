@@ -165,7 +165,7 @@ void fsmonitor_signal_exit(void) {
     log_message(LOG_INFO, "Sending exit signal to event loop");
     
     /* Set up and trigger the user event for exit */
-    EV_SET(&kev, g_user_event_ident, EVFILT_USER, 0, NOTE_TRIGGER | USER_EVENT_EXIT, 0, NULL);
+    EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_EXIT, NULL);
     
     if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
         log_message(LOG_ERR, "Failed to signal exit event: %s", strerror(errno));
@@ -183,7 +183,7 @@ void fsmonitor_signal_reload(void) {
     log_message(LOG_INFO, "Sending reload signal to event loop");
     
     /* Set up and trigger the user event for reload */
-    EV_SET(&kev, g_user_event_ident, EVFILT_USER, 0, NOTE_TRIGGER | USER_EVENT_RELOAD, 0, NULL);
+    EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_RELOAD, NULL);
     
     if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
         log_message(LOG_ERR, "Failed to signal reload event: %s", strerror(errno));
@@ -280,12 +280,12 @@ void fsmonitor_process_events(void) {
     for (int i = 0; i < nev; i++) {
         /* Check for user events */
         if (events[i].filter == EVFILT_USER && events[i].ident == g_user_event_ident) {
-            uint32_t fflags = events[i].fflags;
+            uint32_t data = events[i].data;
             
-            if (fflags & USER_EVENT_EXIT) {
+            if (data == USER_EVENT_EXIT) {
                 g_running = 0;  /* Signal to exit the main loop */
                 log_message(LOG_INFO, "Received exit event");
-            } else if (fflags & USER_EVENT_RELOAD) {
+            } else if (data == USER_EVENT_RELOAD) {
                 log_message(LOG_INFO, "Received reload event, reloading configuration");
                 config_load(DEFAULT_CONFIG_FILE);
             }
