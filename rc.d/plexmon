@@ -15,7 +15,6 @@ load_rc_config $name
 : ${plexmon_user:="plex"}
 : ${plexmon_group:="plex"}
 
-pidfile="/var/run/${name}.pid"
 logfile="/var/log/${name}.log"
 
 command="/usr/local/bin/plexmon"
@@ -26,10 +25,6 @@ plexmon_precmd()
 {
 	if [ ! -f ${logfile} ]; then
 		install -m 640 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${logfile}
-	fi
-	
-	if [ ! -f ${pidfile} ]; then
-		install -m 644 -o ${plexmon_user} -g ${plexmon_group} /dev/null ${pidfile}
 	fi
 }
 

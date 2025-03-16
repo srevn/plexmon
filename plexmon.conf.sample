@@ -25,9 +25,6 @@ daemonize=false
 # Log file path (only used when running as daemon)
 log_file=/var/log/plexmon.log
 
-# PID file path (only used when running as daemon)
-pid_file=/var/run/plexmon.pid
-
 # Additional directories to monitor (optional)
 # directory1=/path/to/additional/directory
 # directory2=/path/to/another/directory

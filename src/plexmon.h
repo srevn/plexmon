@@ -30,7 +30,6 @@
 #define DEFAULT_CONFIG_FILE "/usr/local/etc/plexmon.conf"
 #define DEFAULT_PLEX_URL "http://localhost:32400"
 #define DEFAULT_LOG_FILE "/var/log/plexmon.log"
-#define DEFAULT_PID_FILE "/var/run/plexmon.pid"
 #define DEFAULT_LOG_LEVEL LOG_INFO
 
 /* Maximum number of simultaneous events to monitor */
@@ -55,7 +54,6 @@ typedef struct {
     char plex_token[TOKEN_MAX_LEN];
     char *directories[MAX_EVENT_FDS];  /* List of directories to monitor */
     char log_file[PATH_MAX_LEN];
-    char pid_file[PATH_MAX_LEN];
     int num_directories;
     int scan_interval;      /* Minimum seconds between scans of the same directory */
     int log_level;          /* Log level threshold */

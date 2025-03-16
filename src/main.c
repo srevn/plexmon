@@ -68,7 +68,6 @@ int main(int argc, char *argv[]) {
     memset(&g_config, 0, sizeof(g_config));
     strcpy(g_config.plex_url, DEFAULT_PLEX_URL);
     strcpy(g_config.log_file, DEFAULT_LOG_FILE);
-    strcpy(g_config.pid_file, DEFAULT_PID_FILE);
     g_config.scan_interval = 10;
     g_config.verbose = false;
     g_config.daemonize = false;
@@ -201,7 +200,6 @@ static void signal_handler(int sig) {
  */
 static bool daemonize(void) {
     pid_t pid, sid;
-    FILE *pid_file;
     
     /* Fork off the parent process */
     pid = fork();
@@ -272,16 +270,6 @@ static bool daemonize(void) {
         log_message(LOG_WARNING, "Failed to reopen stderr: %s", strerror(errno));
     }
     
-    /* Write PID file */
-    pid_file = fopen(g_config.pid_file, "w");
-    if (pid_file) {
-        fprintf(pid_file, "%d\n", (int)getpid());
-        fclose(pid_file);
-    } else {
-        log_message(LOG_WARNING, "Could not write PID file %s: %s", 
-                  g_config.pid_file, strerror(errno));
-        /* Not fatal, continue */
-    }
     return true;
 }
 
@@ -292,15 +280,6 @@ static void cleanup(void) {
     fsmonitor_cleanup();
     events_cleanup();
     plexapi_cleanup();
-    
-    /* Remove PID file if we're running as daemon */
-    if (g_config.daemonize) {
-        if (unlink(g_config.pid_file) != 0 && errno != ENOENT) {
-            log_message(LOG_WARNING, "Could not remove PID file %s: %s",
-                       g_config.pid_file, strerror(errno));
-        }
-    }
-    
     config_free();
 }
 
@@ -317,6 +296,7 @@ void log_message(int priority, const char *format, ...) {
     time_t now;
     struct tm *timeinfo;
     char timestamp[20];
+    char message[2048];
     
     /* Get current timestamp */
     time(&now);
@@ -342,8 +322,7 @@ void log_message(int priority, const char *format, ...) {
             priority_str = "UNKNOWN";
     }
     
-    /* Prepare the message */
-    char message[2048];
+    /* Format the message */
     va_start(ap, format);
     vsnprintf(message, sizeof(message), format, ap);
     va_end(ap);
