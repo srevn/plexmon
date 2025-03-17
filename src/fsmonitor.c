@@ -309,7 +309,7 @@ void fsmonitor_process_events(void) {
                 if (is_directory(md->path)) {
                     bool dir_changed = false;
                     
-                    /* Check if directory structure has changed */
+                    /* Directory cache with mtime checking */
                     if (dircache_check_and_update(md->path, &dir_changed)) {
                         if (dir_changed) {
                             log_message(LOG_INFO, "Directory structure changed in %s, rescanning", md->path);
@@ -319,6 +319,7 @@ void fsmonitor_process_events(void) {
                         }
                     } else {
                         /* Cache check failed, fall back to full scan */
+                        log_message(LOG_WARNING, "Failed to check directory cache for %s, falling back to full scan", md->path);
                         register_directory_tree_watches(md->path, md->plex_section_id);
                     }
                 }
