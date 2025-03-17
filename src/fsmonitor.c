@@ -312,10 +312,12 @@ void fsmonitor_process_events(void) {
                     /* Directory cache with mtime checking */
                     if (dircache_check_and_update(md->path, &dir_changed)) {
                         if (dir_changed) {
-                            log_message(LOG_INFO, "Directory structure changed in %s, rescanning", md->path);
+                            log_message(LOG_DEBUG, "Directory structure changed in %s, rescanning directory tree", md->path);
+                            /* Only rescan directory tree when structure has changed */
                             register_directory_tree_watches(md->path, md->plex_section_id);
                         } else {
-                            log_message(LOG_DEBUG, "Directory structure unchanged in %s, skipping rescan", md->path);
+                            /* Still queue a Plex scan but skip directory tree rescanning */
+                            log_message(LOG_INFO, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
                         }
                     } else {
                         /* Cache check failed, fall back to full scan */

@@ -99,6 +99,69 @@ static bool add_subdir(cached_dir_t *dir, const char *path) {
     return true;
 }
 
+/* Check if directory structure has changed by comparing with cache */
+static bool has_directory_structure_changed(const char *path, cached_dir_t *dir) {
+    DIR *dirp;
+    struct dirent *entry;
+    char full_path[PATH_MAX_LEN];
+    int found_subdirs = 0;
+    bool changed = false;
+    
+    if (!(dirp = opendir(path))) {
+        log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
+        return true; /* Assume changed if we can't check */
+    }
+    
+    /* First, count subdirectories to see if the count changed */
+    while ((entry = readdir(dirp)) && !changed) {
+        /* Skip . and .. */
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        /* Construct full path */
+        if (strlen(path) + strlen(entry->d_name) + 2 > PATH_MAX_LEN) {
+            log_message(LOG_WARNING, "Path too long: '%s/%s'", path, entry->d_name);
+            continue;
+        }
+        
+        snprintf(full_path, PATH_MAX_LEN, "%s/%s", path, entry->d_name);
+        
+        /* Count subdirectories */
+        if (is_directory(full_path)) {
+            found_subdirs++;
+            
+            /* Check if this subdirectory exists in our cache */
+            bool found = false;
+            dir_entry_t *current = dir->subdirs;
+            while (current && !found) {
+                if (strcmp(current->path, full_path) == 0) {
+                    found = true;
+                }
+                current = current->next;
+            }
+            
+            /* If subdirectory not in cache, structure has changed */
+            if (!found) {
+                log_message(LOG_DEBUG, "New subdirectory found: %s", full_path);
+                changed = true;
+                break;
+            }
+        }
+    }
+    
+    closedir(dirp);
+    
+    /* If subdirectory count doesn't match, structure has changed */
+    if (!changed && found_subdirs != dir->subdir_count) {
+        log_message(LOG_DEBUG, "Subdirectory count changed: %d -> %d", 
+                   dir->subdir_count, found_subdirs);
+        changed = true;
+    }
+    
+    return changed;
+}
+
 /* Scan a directory and update the cache */
 static bool scan_directory(const char *path, cached_dir_t *dir) {
     DIR *dirp;
@@ -173,15 +236,34 @@ bool dircache_check_and_update(const char *path, bool *changed) {
     if (dir) {
         /* Directory is in cache, check if it has changed */
         if (dir->mtime != current_mtime || !dir->validated) {
-            log_message(LOG_DEBUG, "Directory %s has changed (mtime: %ld -> %ld), updating cache", 
+            log_message(LOG_DEBUG, "Directory %s has modification (mtime: %ld -> %ld), checking structure", 
                        path, dir->mtime, current_mtime);
             
-            /* Update cache */
-            if (!scan_directory(path, dir)) {
-                return false;
+            /* First check if directory structure has changed */
+            bool structure_changed = false;
+            if (dir->validated) {
+                structure_changed = has_directory_structure_changed(path, dir);
+            } else {
+                /* If not validated, assume structure changed */
+                structure_changed = true;
             }
             
-            *changed = true;
+            if (structure_changed) {
+                log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
+                
+                /* Update cache with full scan */
+                if (!scan_directory(path, dir)) {
+                    return false;
+                }
+                
+                *changed = true;
+            } else {
+                log_message(LOG_DEBUG, "Directory structure in %s unchanged, only file modification detected", path);
+                
+                /* Just update the mtime without full rescan */
+                dir->mtime = current_mtime;
+                *changed = false;
+            }
         } else {
             log_message(LOG_DEBUG, "Directory %s unchanged, using cached data", path);
         }
