@@ -38,9 +38,6 @@
 /* Maximum length for paths */
 #define PATH_MAX_LEN 1024
 
-/* Default maximum length for directory names */
-#define NAME_MAX 256
-
 /* Maximum length for Plex token */
 #define TOKEN_MAX_LEN 128
 

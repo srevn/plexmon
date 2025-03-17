@@ -106,7 +106,7 @@ static bool scan_directory(const char *path, cached_dir_t *dir) {
     char full_path[PATH_MAX_LEN];
     
     if (!(dirp = opendir(path))) {
-        log_message(LOG_ERR, "Failed to open directory '%s': %s", path, strerror(errno));
+        log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
         return false;
     }
     
@@ -139,7 +139,7 @@ static bool scan_directory(const char *path, cached_dir_t *dir) {
         /* Add subdirectories to cache */
         if (is_directory(full_path)) {
             if (!add_subdir(dir, full_path)) {
-                log_message(LOG_WARNING, "Failed to add subdirectory '%s' to cache", full_path);
+                log_message(LOG_WARNING, "Failed to add subdirectory %s to cache", full_path);
             }
         }
     }
@@ -163,7 +163,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
     /* Get current mtime */
     current_mtime = get_mtime(path);
     if (current_mtime == 0) {
-        log_message(LOG_WARNING, "Failed to get mtime for '%s'", path);
+        log_message(LOG_WARNING, "Failed to get mtime for %s", path);
         return false;
     }
     
@@ -173,7 +173,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
     if (dir) {
         /* Directory is in cache, check if it has changed */
         if (dir->mtime != current_mtime || !dir->validated) {
-            log_message(LOG_DEBUG, "Directory '%s' has changed (mtime: %ld -> %ld), updating cache", 
+            log_message(LOG_DEBUG, "Directory %s has changed (mtime: %ld -> %ld), updating cache", 
                        path, dir->mtime, current_mtime);
             
             /* Update cache */
@@ -183,7 +183,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
             
             *changed = true;
         } else {
-            log_message(LOG_DEBUG, "Directory '%s' unchanged, using cached data", path);
+            log_message(LOG_DEBUG, "Directory %s unchanged, using cached data", path);
         }
     } else {
         /* Directory not in cache, add it */
@@ -210,7 +210,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
         }
         
         *changed = true;
-        log_message(LOG_DEBUG, "Directory '%s' added to cache", path);
+        log_message(LOG_DEBUG, "Directory %s added to cache", path);
     }
     
     return true;
