@@ -307,7 +307,7 @@ void fsmonitor_process_events(void) {
                 
                 /* Check for new subdirectories that need to be monitored */
                 if (is_directory(md->path)) {
-                    add_watch_recursive(md->path, md->plex_section_id);
+                    register_directory_tree_watches(md->path, md->plex_section_id);
                 }
             }
             
@@ -321,7 +321,7 @@ void fsmonitor_process_events(void) {
 }
 
 /* Recursively add a directory and its subdirectories to the watch list */
-bool add_watch_recursive(const char *dir_path, int section_id) {
+bool register_directory_tree_watches(const char *dir_path, int section_id) {
     dir_queue_t queue;
     char current_path[PATH_MAX_LEN];
     DIR *dir;

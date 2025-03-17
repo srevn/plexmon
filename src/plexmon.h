@@ -105,6 +105,6 @@ void log_message(int priority, const char *format, ...);
 
 /* Utilities */
 bool is_directory(const char *path);
-bool add_watch_recursive(const char *dir_path, int section_id);
+bool register_directory_tree_watches(const char *dir_path, int section_id);
 
 #endif /* PLEXMON_H */

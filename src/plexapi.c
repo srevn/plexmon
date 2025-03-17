@@ -159,7 +159,7 @@ bool plexapi_get_libraries(void) {
                     /* Add this directory to the watch list */
                     log_message(LOG_INFO, "Monitoring library: %s (section %d)", section_path, section_id);
                     
-                    if (!add_watch_recursive(section_path, section_id)) {
+                    if (!register_directory_tree_watches(section_path, section_id)) {
                         log_message(LOG_WARNING, "Failed to add directory %s to watch list", section_path);
                     }
                 }
@@ -181,7 +181,7 @@ bool plexapi_trigger_scan(const char *path, int section_id) {
     struct curl_slist *headers = NULL;
     CURLcode res;
     
-    log_message(LOG_INFO, "Triggering Plex scan for path: %s (section %d)", path, section_id);
+    log_message(LOG_DEBUG, "Triggering Plex scan for path: %s (section %d)", path, section_id);
     
     if (!curl_handle) {
         log_message(LOG_ERR, "CURL not initialized");
@@ -231,6 +231,6 @@ bool plexapi_trigger_scan(const char *path, int section_id) {
     /* Clean up */
     free(response.data);
     
-    log_message(LOG_INFO, "Successfully triggered scan for %s", path);
+    log_message(LOG_DEBUG, "Successfully triggered scan for %s", path);
     return true;
 }
