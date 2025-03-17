@@ -38,6 +38,9 @@
 /* Maximum length for paths */
 #define PATH_MAX_LEN 1024
 
+/* Default maximum length for directory names */
+#define NAME_MAX 256
+
 /* Maximum length for Plex token */
 #define TOKEN_MAX_LEN 128
 
@@ -106,5 +109,12 @@ void log_message(int priority, const char *format, ...);
 /* Utilities */
 bool is_directory(const char *path);
 bool register_directory_tree_watches(const char *dir_path, int section_id);
+
+/* Directory cache */
+bool dircache_init(void);
+void dircache_cleanup(void);
+bool dircache_check_and_update(const char *path, bool *changed);
+char **dircache_get_subdirs(const char *path, int *count);
+void dircache_free_subdirs(char **subdirs, int count);
 
 #endif /* PLEXMON_H */

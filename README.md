@@ -8,6 +8,7 @@ A FreeBSD application that monitors filesystem changes in Plex Media Server libr
 - Automatic detection of Plex libraries and their paths
 - Selective partial scans of only changed directories
 - Event coalescing for the same path to prevent scan overload
+- Efficient directory structure caching to reduce I/O operations
 - Can run as a daemon or in the foreground
 
 ## Requirements

@@ -139,6 +139,13 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
+    /* Initialize directory cache */
+    if (!dircache_init()) {
+        log_message(LOG_ERR, "Failed to initialize directory cache");
+        cleanup();
+        return EXIT_FAILURE;
+    }
+    
     /* Initialize file system monitoring */
     if (!fsmonitor_init()) {
         log_message(LOG_ERR, "Failed to initialize file system monitoring");
@@ -298,6 +305,7 @@ static bool daemonize(void) {
 static void cleanup(void) {
     fsmonitor_cleanup();
     events_cleanup();
+    dircache_cleanup();
     plexapi_cleanup();
     config_free();
 }

@@ -307,7 +307,20 @@ void fsmonitor_process_events(void) {
                 
                 /* Check for new subdirectories that need to be monitored */
                 if (is_directory(md->path)) {
-                    register_directory_tree_watches(md->path, md->plex_section_id);
+                    bool dir_changed = false;
+                    
+                    /* Check if directory structure has changed */
+                    if (dircache_check_and_update(md->path, &dir_changed)) {
+                        if (dir_changed) {
+                            log_message(LOG_INFO, "Directory structure changed in %s, rescanning", md->path);
+                            register_directory_tree_watches(md->path, md->plex_section_id);
+                        } else {
+                            log_message(LOG_DEBUG, "Directory structure unchanged in %s, skipping rescan", md->path);
+                        }
+                    } else {
+                        /* Cache check failed, fall back to full scan */
+                        register_directory_tree_watches(md->path, md->plex_section_id);
+                    }
                 }
             }
             
@@ -324,9 +337,6 @@ void fsmonitor_process_events(void) {
 bool register_directory_tree_watches(const char *dir_path, int section_id) {
     dir_queue_t queue;
     char current_path[PATH_MAX_LEN];
-    DIR *dir;
-    struct dirent *entry;
-    char path[PATH_MAX_LEN];
     bool success = true;
     
     /* Initialize queue */
@@ -344,44 +354,43 @@ bool register_directory_tree_watches(const char *dir_path, int section_id) {
             break;  /* Should not happen */
         }
         
-        /* Open current directory */
-        if (!(dir = opendir(current_path))) {
-            log_message(LOG_ERR, "Failed to open directory %s: %s", current_path, strerror(errno));
-            continue; /* Skip this directory but continue with others */
-        }
-        
         /* Add current directory to monitoring */
         int dir_idx = fsmonitor_add_directory(current_path, section_id);
         if (dir_idx < 0) {
             log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-            closedir(dir);
             continue; /* Skip this directory but continue with others */
         }
         
-        /* Process all entries in current directory */
-        while ((entry = readdir(dir))) {
-            /* Skip . and .. */
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-                continue;
-            }
-            
-            snprintf(path, sizeof(path), "%s/%s", current_path, entry->d_name);
-            
-            /* If it's a directory, add to queue */
-            if (is_directory(path)) {
-                if (!queue_enqueue(&queue, path)) {
+        /* Get subdirectories from cache or scan the filesystem */
+        bool dir_changed = false;
+        
+        /* Check if directory has changed and update cache */
+        if (!dircache_check_and_update(current_path, &dir_changed)) {
+            log_message(LOG_WARNING, "Failed to check/update directory cache for %s", current_path);
+            continue;
+        }
+        
+        /* Get subdirectories from cache */
+        int subdir_count = 0;
+        char **subdirs = dircache_get_subdirs(current_path, &subdir_count);
+        
+        if (subdirs) {
+            /* Process subdirectories */
+            for (int i = 0; i < subdir_count; i++) {
+                if (!queue_enqueue(&queue, subdirs[i])) {
                     log_message(LOG_ERR, "Failed to allocate memory for directory queue");
                     success = false;
                     break;
                 }
             }
-        }
-        
-        closedir(dir);
-        
-        /* If we had a memory allocation error, break out of the loop */
-        if (!success) {
-            break;
+            
+            /* Free subdirectory list */
+            dircache_free_subdirs(subdirs, subdir_count);
+            
+            /* If we had a memory allocation error, break out of the loop */
+            if (!success) {
+                break;
+            }
         }
     }
     
