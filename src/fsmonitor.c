@@ -317,7 +317,7 @@ void fsmonitor_process_events(void) {
                             register_directory_tree_watches(md->path, md->plex_section_id);
                         } else {
                             /* Still queue a Plex scan but skip directory tree rescanning */
-                            log_message(LOG_INFO, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
+                            log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
                         }
                     } else {
                         /* Cache check failed, fall back to full scan */

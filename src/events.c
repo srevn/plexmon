@@ -137,7 +137,7 @@ void events_process_pending(void) {
     for (int i = 0; i < num_pending_scans; i++) {
         if (pending_scans[i].is_pending && now >= pending_scans[i].scheduled_scan_time) {
             /* Time to execute this scan */
-            log_message(LOG_INFO, "Executing scan for %s (events coalesced for %ld seconds)", 
+            log_message(LOG_INFO, "Executing scan for %s (events coalesced for %lds)", 
                        pending_scans[i].path, 
                        now - pending_scans[i].first_event_time);
             
