@@ -317,7 +317,7 @@ void fsmonitor_process_events(void) {
                             int new_dirs = detect_and_register_new_subdirectories(md->path, md->plex_section_id);
                             log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, md->path);
                         } else {
-                            /* Still queue a Plex scan but skip directory registration */
+                            /* Still queue a Plex scan but skip directory tree rescanning */
                             log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
                         }
                     } else {
@@ -326,10 +326,10 @@ void fsmonitor_process_events(void) {
                         detect_and_register_new_subdirectories(md->path, md->plex_section_id);
                     }
                 }
-                
-                /* Queue event */
-                events_handle(md->path, md->plex_section_id);
             }
+            
+            /* Queue event */
+            events_handle(md->path, md->plex_section_id);
         }
     }
     
