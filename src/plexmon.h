@@ -106,6 +106,7 @@ void log_message(int priority, const char *format, ...);
 /* Utilities */
 bool is_directory(const char *path);
 bool register_directory_tree_watches(const char *dir_path, int section_id);
+int detect_and_register_new_subdirectories(const char *dir_path, int section_id);
 
 /* Directory cache */
 bool dircache_init(void);

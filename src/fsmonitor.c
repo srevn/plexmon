@@ -312,23 +312,24 @@ void fsmonitor_process_events(void) {
                     /* Directory cache with mtime checking */
                     if (dircache_check_and_update(md->path, &dir_changed)) {
                         if (dir_changed) {
-                            log_message(LOG_DEBUG, "Directory structure changed in %s, rescanning directory tree", md->path);
-                            /* Only rescan directory tree when structure has changed */
-                            register_directory_tree_watches(md->path, md->plex_section_id);
+                            log_message(LOG_DEBUG, "Directory structure changed in %s, detecting new subdirectories", md->path);
+                            /* Only register new subdirectories instead of full tree rescanning */
+                            int new_dirs = detect_and_register_new_subdirectories(md->path, md->plex_section_id);
+                            log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, md->path);
                         } else {
-                            /* Still queue a Plex scan but skip directory tree rescanning */
+                            /* Still queue a Plex scan but skip directory registration */
                             log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
                         }
                     } else {
-                        /* Cache check failed, fall back to full scan */
-                        log_message(LOG_WARNING, "Failed to check directory cache for %s, falling back to full scan", md->path);
-                        register_directory_tree_watches(md->path, md->plex_section_id);
+                        /* Cache check failed, fall back to targeted refresh instead of full scan */
+                        log_message(LOG_WARNING, "Failed to check directory cache for %s, using targeted refresh", md->path);
+                        detect_and_register_new_subdirectories(md->path, md->plex_section_id);
                     }
                 }
+                
+                /* Queue event */
+                events_handle(md->path, md->plex_section_id);
             }
-            
-            /* Queue event */
-            events_handle(md->path, md->plex_section_id);
         }
     }
     
@@ -401,6 +402,66 @@ bool register_directory_tree_watches(const char *dir_path, int section_id) {
     queue_free(&queue);
     
     return success;
+}
+
+/* Detect and register new subdirectories */
+int detect_and_register_new_subdirectories(const char *dir_path, int section_id) {
+    int subdir_count = 0;
+    char **subdirs = NULL;
+    int new_dirs_count = 0;
+    
+    log_message(LOG_DEBUG, "Detecting new subdirectories in %s", dir_path);
+    
+    /* Get subdirectories from cache */
+    subdirs = dircache_get_subdirs(dir_path, &subdir_count);
+    
+    if (!subdirs) {
+        /* Cache miss, update it and try again */
+        bool dir_changed = false;
+        if (dircache_check_and_update(dir_path, &dir_changed)) {
+            subdirs = dircache_get_subdirs(dir_path, &subdir_count);
+        }
+    }
+    
+    if (!subdirs) {
+        log_message(LOG_DEBUG, "Failed to get subdirectories for %s", dir_path);
+        return 0;
+    }
+    
+    /* Check each subdirectory */
+    for (int i = 0; i < subdir_count; i++) {
+        /* Check if this subdirectory is already being monitored */
+        bool already_monitored = false;
+        for (int j = 0; j < num_monitored_dirs; j++) {
+            if (strcmp(monitored_dirs[j].path, subdirs[i]) == 0) {
+                already_monitored = true;
+                break;
+            }
+        }
+        
+        if (!already_monitored) {
+            /* Add this new directory to monitoring */
+            int dir_idx = fsmonitor_add_directory(subdirs[i], section_id);
+            if (dir_idx >= 0) {
+                new_dirs_count++;
+                
+                /* Recursively check this directory for new subdirectories */
+                new_dirs_count += detect_and_register_new_subdirectories(subdirs[i], section_id);
+            } else {
+                log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
+            }
+        }
+    }
+    
+    /* Free subdirectory list */
+    dircache_free_subdirs(subdirs, subdir_count);
+    
+    if (new_dirs_count > 0) {
+        log_message(LOG_INFO, "Added %d new directories under %s to monitoring", 
+                   new_dirs_count, dir_path);
+    }
+    
+    return new_dirs_count;
 }
 
 /* Check if a path is a directory */
