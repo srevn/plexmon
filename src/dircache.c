@@ -81,24 +81,6 @@ static cached_dir_t *find_dir(const char *path) {
     return NULL;
 }
 
-/* Add a subdirectory to the cache entry */
-static bool add_subdir(cached_dir_t *dir, const char *path) {
-    dir_entry_t *new_entry = malloc(sizeof(dir_entry_t));
-    if (!new_entry) {
-        log_message(LOG_ERR, "Failed to allocate memory for subdirectory entry");
-        return false;
-    }
-    
-    strncpy(new_entry->path, path, PATH_MAX_LEN - 1);
-    new_entry->path[PATH_MAX_LEN - 1] = '\0';
-    new_entry->next = dir->subdirs;
-    
-    dir->subdirs = new_entry;
-    dir->subdir_count++;
-    
-    return true;
-}
-
 /* Check if directory structure has changed and updates cache */
 static bool dirstructure_check_and_update(const char *path, cached_dir_t *dir, bool *changed) {
     DIR *dirp;
