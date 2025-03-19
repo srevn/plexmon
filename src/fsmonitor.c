@@ -398,7 +398,7 @@ bool watch_directory_tree(const char *dir_path, int section_id) {
         return false;
     }
     
-    log_message(LOG_INFO, "Starting directory tree registration from %s", dir_path);
+    log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
     
     /* Process directories from the queue */
     while (!queue_is_empty(&queue)) {
