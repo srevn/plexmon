@@ -153,7 +153,7 @@ void events_process_pending(void) {
 }
 
 /* Get time until next scheduled scan */
-time_t get_next_scheduled_scan_time(void) {
+time_t next_scheduled_scan(void) {
     time_t next_time = 0;
     time_t now = time(NULL);
 

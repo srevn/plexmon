@@ -266,7 +266,7 @@ void fsmonitor_process_events(void) {
     time_t now, next_scan, time_left;
 
     now = time(NULL);
-    next_scan = get_next_scheduled_scan_time();
+    next_scan = next_scheduled_scan();
 
     if (next_scan > now) {
         time_left = next_scan - now;
