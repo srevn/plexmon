@@ -159,7 +159,7 @@ bool plexapi_get_libraries(void) {
                     /* Add this directory to the watch list */
                     log_message(LOG_INFO, "Monitoring library: %s (section %d)", section_path, section_id);
                     
-                    if (!register_directory_tree_watches(section_path, section_id)) {
+                    if (!watch_directory_tree(section_path, section_id)) {
                         log_message(LOG_WARNING, "Failed to add directory %s to watch list", section_path);
                     }
                 }

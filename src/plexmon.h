@@ -106,13 +106,13 @@ void log_message(int priority, const char *format, ...);
 
 /* Utilities */
 bool is_directory(const char *path);
-bool register_directory_tree_watches(const char *dir_path, int section_id);
-int detect_and_register_new_subdirectories(const char *dir_path, int section_id);
+bool watch_directory_tree(const char *dir_path, int section_id);
+int scan_new_directories(const char *dir_path, int section_id);
 
 /* Directory cache */
 bool dircache_init(void);
 void dircache_cleanup(void);
-bool dircache_check_and_update(const char *path, bool *changed);
+bool dircache_refresh(const char *path, bool *changed);
 char **dircache_get_subdirs(const char *path, int *count);
 void dircache_free_subdirs(char **subdirs, int count);
 

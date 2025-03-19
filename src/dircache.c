@@ -82,7 +82,7 @@ static cached_dir_t *find_dir(const char *path) {
 }
 
 /* Check if directory structure has changed and updates cache */
-static bool dirstructure_check_and_update(const char *path, cached_dir_t *dir, bool *changed) {
+static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *changed) {
     DIR *dirp;
     struct dirent *entry;
     char full_path[PATH_MAX_LEN];
@@ -236,7 +236,7 @@ static bool dirstructure_check_and_update(const char *path, cached_dir_t *dir, b
 }
 
 /* Check if directory has changed and update cache if needed */
-bool dircache_check_and_update(const char *path, bool *changed) {
+bool dircache_refresh(const char *path, bool *changed) {
     cached_dir_t *dir;
     time_t current_mtime;
     
@@ -259,7 +259,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
                        path, dir->mtime, current_mtime);
             
             /* Check and update directory structure in one pass */
-            return dirstructure_check_and_update(path, dir, changed);
+            return sync_directory_tree(path, dir, changed);
         } else {
             log_message(LOG_DEBUG, "Directory %s unchanged, using cached data", path);
         }
@@ -283,7 +283,7 @@ bool dircache_check_and_update(const char *path, bool *changed) {
         cache_head = dir;
         
         /* Check and update directory structure */
-        if (!dirstructure_check_and_update(path, dir, changed)) {
+        if (!sync_directory_tree(path, dir, changed)) {
             /* Clean up on failure */
             cache_head = dir->next;
             free(dir);
