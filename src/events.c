@@ -124,9 +124,6 @@ void events_handle(const char *path, int section_id) {
         
         log_message(LOG_DEBUG, "Scheduled new scan for %s", path);
     }
-    
-    /* Clean up any completed scans */
-    cleanup_completed_scans();
 }
 
 /* Process any pending scans that are due */
