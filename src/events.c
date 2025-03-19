@@ -152,6 +152,21 @@ void events_process_pending(void) {
     }
 }
 
+/* Get time until next scheduled scan */
+time_t get_next_scheduled_scan_time(void) {
+    time_t next_time = 0;
+    time_t now = time(NULL);
+
+    for (int i = 0; i < num_pending_scans; i++) {
+        if (pending_scans[i].is_pending && pending_scans[i].scheduled_scan_time > now) {
+            if (next_time == 0 || pending_scans[i].scheduled_scan_time < next_time) {
+                next_time = pending_scans[i].scheduled_scan_time;
+            }
+        }
+    }
+    return next_time;
+}
+
 /* Remove completed scans from the array */
 static void cleanup_completed_scans(void) {
     int i, j;

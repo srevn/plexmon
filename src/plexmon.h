@@ -97,6 +97,7 @@ bool events_init(void);
 void events_cleanup(void);
 void events_handle(const char *path, int section_id);
 void events_process_pending(void);
+time_t get_next_scheduled_scan_time(void);
 
 /* Logging */
 bool log_init(void);

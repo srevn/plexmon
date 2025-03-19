@@ -262,12 +262,28 @@ int fsmonitor_add_directory(const char *path, int plex_section_id) {
 void fsmonitor_process_events(void) {
     struct kevent events[MAX_EVENT_FDS];
     int nev;
-    
     struct timespec timeout;
-    timeout.tv_sec = 1;  /* 1 second timeout */
-    timeout.tv_nsec = 0;
-    
-    nev = kevent(g_kqueue_fd, NULL, 0, events, MAX_EVENT_FDS, &timeout);
+    time_t now, next_scan, time_left;
+
+    now = time(NULL);
+    next_scan = get_next_scheduled_scan_time();
+
+    if (next_scan > now) {
+        time_left = next_scan - now;
+        timeout.tv_sec = time_left;
+        timeout.tv_nsec = 0;
+    } else {
+        // No pending scans or immediate processing needed
+        timeout.tv_sec = 0;
+        timeout.tv_nsec = 0;
+    }
+
+    // Handle indefinite wait if no scans and no events
+    if (next_scan == 0) {
+        nev = kevent(g_kqueue_fd, NULL, 0, events, MAX_EVENT_FDS, NULL);
+    } else {
+        nev = kevent(g_kqueue_fd, NULL, 0, events, MAX_EVENT_FDS, &timeout);
+    }
     
     if (nev == -1) {
         if (errno != EINTR) {
