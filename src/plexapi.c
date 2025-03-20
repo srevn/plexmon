@@ -66,6 +66,95 @@ void plexapi_cleanup(void) {
     curl_global_cleanup();
 }
 
+/* Check connectivity to the Plex Media Server */
+bool check_plex_connection(void) {
+    curl_response_t response;
+    char url[1024];
+    struct curl_slist *headers = NULL;
+    CURLcode res;
+    long http_code = 0;
+    time_t start_time, current_time;
+    
+    log_message(LOG_INFO, "Attempting to connect to %s", g_config.plex_url);
+    
+    if (!curl_handle) {
+        log_message(LOG_ERR, "CURL not initialized");
+        return false;
+    }
+    
+    /* Construct request URL for server identity endpoint */
+    snprintf(url, sizeof(url), "%s/identity", g_config.plex_url);
+    
+    /* Set up headers */
+    headers = curl_slist_append(headers, "Accept: application/json");
+    
+    if (strlen(g_config.plex_token) > 0) {
+        char auth_header[TOKEN_MAX_LEN + 20];
+        snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+        headers = curl_slist_append(headers, auth_header);
+    }
+    
+    /* Set curl options */
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 5L);
+    
+    start_time = time(NULL);
+    
+    do {
+        /* Initialize response struct */
+        response.data = malloc(1);
+        if (!response.data) {
+            curl_slist_free_all(headers);
+            log_message(LOG_ERR, "Memory allocation failed");
+            return false;
+        }
+        response.size = 0;
+        
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&response);
+        
+        /* Perform the request */
+        res = curl_easy_perform(curl_handle);
+        
+        if (res == CURLE_OK) {
+            /* Check HTTP status code */
+            curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_code);
+            
+            if (http_code >= 200 && http_code < 300) {
+                log_message(LOG_INFO, "Successfully connected to Plex Media Server");
+                free(response.data);
+                curl_slist_free_all(headers);
+                return true;
+            } else {
+                log_message(LOG_DEBUG, "Plex server responded with HTTP %ld", http_code);
+            }
+        } else {
+            log_message(LOG_DEBUG, "Failed to connect to Plex: %s", curl_easy_strerror(res));
+        }
+        
+        /* Clean up response */
+        free(response.data);
+        
+        /* Check timeout */
+        current_time = time(NULL);
+        if (current_time - start_time >= g_config.startup_timeout) {
+            curl_slist_free_all(headers);
+            log_message(LOG_ERR, "Connection timeout reached after %d seconds", 
+                       g_config.startup_timeout);
+            return false;
+        }
+        
+        /* Wait before retrying */
+        log_message(LOG_DEBUG, "Retrying connection in 5 seconds...");
+        sleep(5);
+        
+    } while (1);
+    
+    /* This point should never be reached */
+    curl_slist_free_all(headers);
+    return false;
+}
+
 /* Get libraries from Plex server */
 bool plexapi_get_libraries(void) {
     curl_response_t response;

@@ -94,6 +94,7 @@ bool plexapi_init(void);
 void plexapi_cleanup(void);
 bool plexapi_get_libraries(void);
 bool plexapi_trigger_scan(const char *path, int section_id);
+bool check_plex_connection(void);
 
 /* Event processing */
 bool events_init(void);

@@ -121,11 +121,6 @@ int main(int argc, char *argv[]) {
     signal(SIGHUP, signal_handler);
     signal(SIGTERM, signal_handler);
     
-    /* Plex connection timeout */
-    time_t start_time = time(NULL);
-    time_t current_time;
-    bool connected = false;
-    
     /* Initialize components */
     if (!plexapi_init()) {
         log_message(LOG_ERR, "Failed to initialize Plex API client");
@@ -153,24 +148,18 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
-    /* Get libraries from Plex */
-    log_message(LOG_INFO, "Attempting to connect to Plex Media Server...");
+    /* Check connectivity to Plex Media Server */
+    if (!check_plex_connection()) {
+        log_message(LOG_ERR, "Failed to connect to Plex Media Server. Exiting.");
+        cleanup();
+        return EXIT_FAILURE;
+    }
     
-    while (!connected) {
-        if (plexapi_get_libraries()) {
-            connected = true;
-            break;
-        }
-        
-        current_time = time(NULL);
-        
-        if (current_time - start_time >= g_config.startup_timeout) {
-            log_message(LOG_ERR, "Timeout reached after %d seconds. Exiting.", g_config.startup_timeout);
-            cleanup();
-            return EXIT_FAILURE;
-        }
-        
-        sleep(5);
+    /* Get libraries from Plex */
+    if (!plexapi_get_libraries()) {
+        log_message(LOG_ERR, "Failed to get library directories from Plex");
+        cleanup();
+        return EXIT_FAILURE;
     }
     
     log_message(LOG_INFO, "Monitoring %d directories for changes", get_monitored_dir_count());
