@@ -9,7 +9,7 @@ A FreeBSD application that monitors filesystem changes in Plex Media Server libr
 - Selective partial scans of only changed directories
 - Grouping of filesystem events with the same path to prevent scan overload
 - Directory structure caching to reduce I/O operations
-- Hash tables for cached directories and path lookups during comparisons
+- Using hash tables for path lookups during comparisons
 - Can run as a daemon or in the foreground
 
 ## Requirements
