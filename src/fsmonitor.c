@@ -258,6 +258,7 @@ int fsmonitor_add_directory(const char *path, int plex_section_id) {
     return num_monitored_dirs++;
 }
 
+/* Handle directory events */
 static void handle_directory_event(const struct kevent *event, monitored_dir_t *md) {
     
     if (!(event->fflags & NOTE_WRITE)) return;
@@ -266,7 +267,8 @@ static void handle_directory_event(const struct kevent *event, monitored_dir_t *
     log_message(LOG_INFO, "Change detected in directory: %s", path);
 
     if (!is_directory(path)) return;
-
+    
+    /* Directory cache with mtime checking */
     bool dir_changed = false;
     if (!dircache_refresh(path, &dir_changed)) {
         log_message(LOG_WARNING, "Failed to check directory cache for %s, using targeted refresh", path);
@@ -276,17 +278,20 @@ static void handle_directory_event(const struct kevent *event, monitored_dir_t *
 
     if (dir_changed) {
         log_message(LOG_DEBUG, "Directory structure changed in %s, detecting new subdirectories", path);
+        /* Only register new subdirectories instead of full tree rescanning */
         int new_dirs = scan_new_directories(path, md->plex_section_id);
         log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, path);
     } else {
+        /* Still queue a Plex scan but skip directory tree rescanning */
         log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan", path);
     }
-
+    
+    /* Queue event */
     events_handle(path, md->plex_section_id);
 }
 
 static void process_event(const struct kevent *event) {
-    
+    /* Check for user events */
     if (event->filter == EVFILT_USER && event->ident == g_user_event_ident) {
         
         uint32_t data = event->data;
@@ -385,22 +390,22 @@ static bool process_directory_queue(dir_queue_t *queue, int section_id, bool sca
 
     while (!queue_is_empty(queue)) {
         if (!queue_dequeue(queue, current_path)) break;
-
+        
         /* Common monitoring check */
         if (!is_directory_monitored(current_path) && !scan_mode) {
             int dir_idx = fsmonitor_add_directory(current_path, section_id);
             if (dir_idx < 0) continue;
             log_message(LOG_DEBUG, "Added directory %s to monitoring", current_path);
         }
-
+        
         /* Common subdirectory processing */
         int subdir_count = 0;
         char **subdirs = get_subdirectories(current_path, &subdir_count);
         if (!subdirs) continue;
-
+        
         for (int i = 0; i < subdir_count; i++) {
             if (scan_mode && is_directory_monitored(subdirs[i])) continue;
-
+            
             if (scan_mode) {
                 int dir_idx = fsmonitor_add_directory(subdirs[i], section_id);
                 if (dir_idx >= 0) {
@@ -408,7 +413,7 @@ static bool process_directory_queue(dir_queue_t *queue, int section_id, bool sca
                     log_message(LOG_DEBUG, "Added new directory %s to monitoring", subdirs[i]);
                 }
             }
-
+            
             if (!queue_enqueue(queue, subdirs[i])) {
                 log_message(LOG_ERR, "Directory queue allocation failed");
                 dircache_free_subdirs(subdirs, subdir_count);

@@ -107,16 +107,16 @@ bool log_init(void);
 void log_cleanup(void);
 void log_message(int priority, const char *format, ...);
 
-/* Utilities */
-bool is_directory(const char *path);
-bool watch_directory_tree(const char *dir_path, int section_id);
-int scan_new_directories(const char *dir_path, int section_id);
-
 /* Directory cache */
 bool dircache_init(void);
 void dircache_cleanup(void);
 bool dircache_refresh(const char *path, bool *changed);
 char **dircache_get_subdirs(const char *path, int *count);
 void dircache_free_subdirs(char **subdirs, int count);
+
+/* Utilities */
+bool is_directory(const char *path);
+bool watch_directory_tree(const char *dir_path, int section_id);
+int scan_new_directories(const char *dir_path, int section_id);
 
 #endif /* PLEXMON_H */
