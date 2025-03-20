@@ -104,7 +104,7 @@ static time_t get_mtime(const char *path) {
     return st.st_mtime;
 }
 
-/* Find a directory in the cache - O(1) operation with hash table */
+/* Find a directory in the cache */
 static cached_dir_t *find_dir(const char *path) {
     ENTRY item, *result;
     
@@ -155,7 +155,7 @@ static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *chang
     }
     htab_initialized = true;
     
-    /* First, add existing subdirectories to old_paths_htab for O(1) lookups */
+    /* First, add existing subdirectories to old_paths_htab */
     if (dir->validated) {
         dir_entry_t *current = dir->subdirs;
         while (current) {
@@ -231,7 +231,7 @@ static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *chang
             new_subdirs = new_entry;
             new_subdir_count++;
             
-            /* Check if this directory is in our existing cache - O(1) operation now */
+            /* Check if this directory is in our existing cache */
             if (dir->validated && !structure_changed) {
                 ENTRY search_item;
                 search_item.key = full_path;
@@ -253,7 +253,7 @@ static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *chang
         structure_changed = true;
     }
     
-    /* Check for deleted subdirectories - only if we haven't already detected changes */
+    /* Check for deleted subdirectories */
     if (!structure_changed && dir->validated) {
         dir_entry_t *current = dir->subdirs;
         while (current && !structure_changed) {
@@ -333,7 +333,7 @@ bool dircache_refresh(const char *path, bool *changed) {
         return false;
     }
     
-    /* Check if directory is in cache - now an O(1) operation */
+    /* Check if directory is in cache */
     dir = find_dir(path);
     
     if (dir) {
