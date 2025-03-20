@@ -64,10 +64,6 @@ bool config_load(const char *config_path) {
                                      strcmp(value, "yes") == 0 || 
                                      strcmp(value, "1") == 0);
             }
-            else if (strcmp(k, "log_file") == 0) {
-                strncpy(g_config.log_file, value, PATH_MAX_LEN - 1);
-                g_config.log_file[PATH_MAX_LEN - 1] = '\0';
-            }
             else if (strcmp(k, "log_level") == 0) {
                 if (strcasecmp(value, "debug") == 0) {
                     g_config.log_level = LOG_DEBUG;
@@ -76,6 +72,10 @@ bool config_load(const char *config_path) {
                 } else {
                     log_message(LOG_WARNING, "Invalid log_level (%s), using default", value);
                 }
+            }
+            else if (strcmp(k, "log_file") == 0) {
+                strncpy(g_config.log_file, value, PATH_MAX_LEN - 1);
+                g_config.log_file[PATH_MAX_LEN - 1] = '\0';
             }
             else if (strncmp(k, "directory", 9) == 0) {
                 if (g_config.num_directories < MAX_EVENT_FDS) {

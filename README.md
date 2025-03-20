@@ -8,7 +8,7 @@ A FreeBSD application that monitors filesystem changes in Plex Media Server libr
 - Automatic detection of Plex libraries and their paths
 - Selective partial scans of only changed directories
 - Grouping of filesystem events with the same path to prevent scan overload
-- Efficient directory structure caching to reduce I/O operations
+- Directory structure caching to reduce I/O operations
 - Hash tables for cached directories and path lookups during comparisons
 - Can run as a daemon or in the foreground
 
@@ -54,14 +54,14 @@ plex_token=YOUR_PLEX_TOKEN_HERE
 # Maximum time to wait for Plex server at startup (in seconds)
 startup_timeout=60
 
-# Log level (info or debug)
-log_level=info
-
 # Run in verbose mode
 verbose=true
 
 # Run as daemon
 daemonize=false
+
+# Log level (info or debug)
+log_level=info
 
 # Log file (only used when running as daemon)
 log_file=/var/log/plexmon.log
