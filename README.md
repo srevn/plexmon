@@ -7,8 +7,9 @@ A FreeBSD application that monitors filesystem changes in Plex Media Server libr
 - Real-time monitoring of Plex library directories using FreeBSD's kqueue
 - Automatic detection of Plex libraries and their paths
 - Selective partial scans of only changed directories
-- Event coalescing for the same path to prevent scan overload
+- Grouping of filesystem events with the same path to prevent scan overload
 - Efficient directory structure caching to reduce I/O operations
+- Hash tables for cached directories and path lookups during comparisons
 - Can run as a daemon or in the foreground
 
 ## Requirements

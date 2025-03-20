@@ -290,6 +290,7 @@ static void handle_directory_event(const struct kevent *event, monitored_dir_t *
     events_handle(path, md->plex_section_id);
 }
 
+/* Process a single event */
 static void process_event(const struct kevent *event) {
     /* Check for user events */
     if (event->filter == EVFILT_USER && event->ident == g_user_event_ident) {
@@ -318,6 +319,7 @@ static void process_event(const struct kevent *event) {
     handle_directory_event(event, md);
 }
 
+/* Calculate the timeout for the next scan */
 static void calculate_timeout(time_t next_scan, struct timespec *timeout) {
     time_t now = time(NULL);
     time_t time_left = next_scan > now ? next_scan - now : 0;
