@@ -21,6 +21,7 @@ static int num_pending_scans = 0;
 /* Forward declarations */
 static int find_pending_scan(const char *path);
 static int find_parent_pending_scan(const char *path);
+static void find_child_pending_scans(const char *path, int *child_indices, int *num_children, int max_children);
 static void cleanup_completed_scans(void);
 
 /* Initialize event processor */
@@ -71,6 +72,28 @@ static int find_parent_pending_scan(const char *path) {
     return -1;
 }
 
+/* Find pending scans for child directories of the given path */
+static void find_child_pending_scans(const char *path, int *child_indices, int *num_children, int max_children) {
+    size_t path_len = strlen(path);
+    *num_children = 0;
+    
+    for (int i = 0; i < num_pending_scans && *num_children < max_children; i++) {
+        if (!pending_scans[i].is_pending) {
+            continue;
+        }
+        
+        size_t child_len = strlen(pending_scans[i].path);
+        
+        /* Check if this is a child directory of our path */
+        if (path_len < child_len && 
+            strncmp(path, pending_scans[i].path, path_len) == 0 && 
+            (pending_scans[i].path[path_len] == '/' || pending_scans[i].path[path_len] == '\0')) {
+            child_indices[*num_children] = i;
+            (*num_children)++;
+        }
+    }
+}
+
 /* Handle a file system event */
 void events_handle(const char *path, int section_id) {
     int idx, parent_idx;
@@ -95,34 +118,73 @@ void events_handle(const char *path, int section_id) {
         pending_scans[idx].scheduled_scan_time = now + debounce_delay;
         log_message(LOG_DEBUG, "Rescheduled scan for %s to coalesce with new event", path);
     } else {
-        /* New pending scan */
-        if (num_pending_scans >= MAX_EVENT_FDS) {
-            /* Find the oldest scheduled scan to replace */
-            time_t oldest_time = now + 86400; /* Initialize with distant future */
-            idx = 0;
+        /* Check if this path is a parent of any pending scans */
+        int child_indices[MAX_EVENT_FDS];
+        int num_children = 0;
+        
+        find_child_pending_scans(path, child_indices, &num_children, MAX_EVENT_FDS);
+        
+        if (num_children > 0) {
+            /* This is a parent directory of one or more pending scans */
+            log_message(LOG_DEBUG, "Path %s is parent of %d pending scans, consolidating", path, num_children);
             
-            for (int i = 0; i < num_pending_scans; i++) {
-                if (pending_scans[i].is_pending && 
-                    pending_scans[i].scheduled_scan_time < oldest_time) {
-                    oldest_time = pending_scans[i].scheduled_scan_time;
-                    idx = i;
+            /* Create a new scan for this parent directory */
+            if (num_pending_scans >= MAX_EVENT_FDS) {
+                /* Use one of the child slots */
+                idx = child_indices[0];
+            } else {
+                idx = num_pending_scans++;
+            }
+            
+            /* Set up the parent scan */
+            strncpy(pending_scans[idx].path, path, PATH_MAX_LEN - 1);
+            pending_scans[idx].path[PATH_MAX_LEN - 1] = '\0';
+            pending_scans[idx].section_id = section_id;
+            pending_scans[idx].first_event_time = now;
+            pending_scans[idx].scheduled_scan_time = now + debounce_delay;
+            pending_scans[idx].is_pending = true;
+            
+            /* Mark child scans as not pending (except the one we reused) */
+            for (int i = 0; i < num_children; i++) {
+                if (child_indices[i] != idx) {
+                    pending_scans[child_indices[i]].is_pending = false;
+                    log_message(LOG_DEBUG, "Removed child scan %s in favor of parent %s", 
+                               pending_scans[child_indices[i]].path, path);
                 }
             }
             
-            log_message(LOG_DEBUG, "Replacing oldest pending scan (%s) with new scan", 
-                       pending_scans[idx].path);
+            log_message(LOG_DEBUG, "Scheduled new parent scan for %s (replaced %d child scans)", 
+                       path, num_children);
         } else {
-            idx = num_pending_scans++;
+            /* New pending scan with no related existing scans */
+            if (num_pending_scans >= MAX_EVENT_FDS) {
+                /* Find the oldest scheduled scan to replace */
+                time_t oldest_time = now + 86400; /* Initialize with distant future */
+                idx = 0;
+                
+                for (int i = 0; i < num_pending_scans; i++) {
+                    if (pending_scans[i].is_pending && 
+                        pending_scans[i].scheduled_scan_time < oldest_time) {
+                        oldest_time = pending_scans[i].scheduled_scan_time;
+                        idx = i;
+                    }
+                }
+                
+                log_message(LOG_DEBUG, "Replacing oldest pending scan (%s) with new scan", 
+                           pending_scans[idx].path);
+            } else {
+                idx = num_pending_scans++;
+            }
+            
+            strncpy(pending_scans[idx].path, path, PATH_MAX_LEN - 1);
+            pending_scans[idx].path[PATH_MAX_LEN - 1] = '\0';
+            pending_scans[idx].section_id = section_id;
+            pending_scans[idx].first_event_time = now;
+            pending_scans[idx].scheduled_scan_time = now + debounce_delay;
+            pending_scans[idx].is_pending = true;
+            
+            log_message(LOG_DEBUG, "Scheduled new scan for %s", path);
         }
-        
-        strncpy(pending_scans[idx].path, path, PATH_MAX_LEN - 1);
-        pending_scans[idx].path[PATH_MAX_LEN - 1] = '\0';
-        pending_scans[idx].section_id = section_id;
-        pending_scans[idx].first_event_time = now;
-        pending_scans[idx].scheduled_scan_time = now + debounce_delay;
-        pending_scans[idx].is_pending = true;
-        
-        log_message(LOG_DEBUG, "Scheduled new scan for %s", path);
     }
 }
 
