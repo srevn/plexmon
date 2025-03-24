@@ -7,11 +7,11 @@
 
 /* Structure to track pending scan requests */
 typedef struct {
-    char path[PATH_MAX_LEN];
-    int section_id;
-    time_t first_event_time;    /* When first event was received */
-    time_t scheduled_scan_time; /* When the scan is scheduled to run */
-    bool is_pending;            /* Is this scan still pending execution? */
+    char path[PATH_MAX_LEN];       /* Path to scan */
+    int section_id;                /* Plex section ID */
+    time_t first_event_time;       /* When first event was received */
+    time_t scheduled_scan_time;    /* When the scan is scheduled to run */
+    bool is_pending;               /* Is this scan still pending execution? */
 } pending_scan_t;
 
 /* Array of pending scans */

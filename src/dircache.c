@@ -8,8 +8,8 @@
 
 /* Structure to represent a subdirectory entry */
 typedef struct dir_entry {
-    char path[PATH_MAX_LEN];
-    struct dir_entry *next;
+    char path[PATH_MAX_LEN];            /* Subdirectory path */
+    struct dir_entry *next;             /* Pointer to next entry */
 } dir_entry_t;
 
 /* Structure to represent a cached directory */
@@ -29,7 +29,7 @@ static int dir_cache_count = 0;
 typedef struct cache_entry_tracker {
     char *key;                          /* Allocated string for hash key */
     cached_dir_t *dir;                  /* The cached directory entry */
-    struct cache_entry_tracker *next;
+    struct cache_entry_tracker *next;   /* Next entry in the tracker */
 } cache_entry_tracker_t;
 
 static cache_entry_tracker_t *entry_tracker_head = NULL;
@@ -308,10 +308,6 @@ static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *chang
     
     /* Clean up hash tables */
     if (htab_initialized) {
-        /* Note: hdestroy_r doesn't free the keys we allocated with strdup */
-        /* We need to iterate through the entries and free them manually */
-        /* But the hsearch API doesn't provide a way to iterate all entries */
-        /* The best we can do is let them be freed at program exit */
         hdestroy_r(&new_paths_htab);
         hdestroy_r(&old_paths_htab);
     }

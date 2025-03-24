@@ -5,7 +5,7 @@ CFLAGS = -I/usr/local/include -Wall -Wextra -g
 LDFLAGS = -L/usr/local/lib -lcurl -ljson-c
 
 # Source files
-SRC = src/main.c src/config.c src/fsmonitor.c src/plexapi.c src/events.c src/dircache.c
+SRC = src/main.c src/config.c src/fsmonitor.c src/plexapi.c src/events.c src/dircache.c src/utilities.c
 OBJ = $(SRC:.c=.o)
 TARGET = plexmon
 

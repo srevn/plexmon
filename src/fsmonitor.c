@@ -11,94 +11,6 @@ static int num_monitored_dirs = 0;
 /* Global kqueue descriptor */
 static int g_kqueue_fd = -1;
 
-/* User event identifiers */
-#define USER_EVENT_EXIT    1
-#define USER_EVENT_RELOAD  2
-static uintptr_t g_user_event_ident = 0;
-
-/* Structure to represent a directory queue node */
-typedef struct dir_queue_node {
-    char path[PATH_MAX_LEN];
-    struct dir_queue_node *next;
-} dir_queue_node_t;
-
-/* Structure for a FIFO queue */
-typedef struct {
-    dir_queue_node_t *front;
-    dir_queue_node_t *rear;
-} dir_queue_t;
-
-/* Initialize an empty queue */
-static void queue_init(dir_queue_t *queue) {
-    queue->front = NULL;
-    queue->rear = NULL;
-}
-
-/* Add an item to the queue (enqueue) */
-static bool queue_enqueue(dir_queue_t *queue, const char *path) {
-    dir_queue_node_t *new_node = malloc(sizeof(dir_queue_node_t));
-    if (!new_node) {
-        return false;
-    }
-    
-    strncpy(new_node->path, path, PATH_MAX_LEN - 1);
-    new_node->path[PATH_MAX_LEN - 1] = '\0';
-    new_node->next = NULL;
-    
-    if (queue->rear == NULL) {
-        /* Empty queue */
-        queue->front = new_node;
-        queue->rear = new_node;
-    } else {
-        /* Add to the end */
-        queue->rear->next = new_node;
-        queue->rear = new_node;
-    }
-    
-    return true;
-}
-
-/* Remove an item from the queue (dequeue) */
-static bool queue_dequeue(dir_queue_t *queue, char *path) {
-    if (queue->front == NULL) {
-        return false;
-    }
-    
-    dir_queue_node_t *temp = queue->front;
-    
-    strncpy(path, temp->path, PATH_MAX_LEN - 1);
-    path[PATH_MAX_LEN - 1] = '\0';
-    
-    queue->front = queue->front->next;
-    
-    if (queue->front == NULL) {
-        queue->rear = NULL;
-    }
-    
-    free(temp);
-    return true;
-}
-
-/* Free all nodes in the queue */
-static void queue_free(dir_queue_t *queue) {
-    dir_queue_node_t *current, *next;
-    
-    current = queue->front;
-    while (current) {
-        next = current->next;
-        free(current);
-        current = next;
-    }
-    
-    queue->front = NULL;
-    queue->rear = NULL;
-}
-
-/* Check if queue is empty */
-static bool queue_is_empty(dir_queue_t *queue) {
-    return queue->front == NULL;
-}
-
 /* Initialize file system monitoring */
 bool fsmonitor_init(void) {
     log_message(LOG_INFO, "Initializing file system monitoring");
@@ -190,14 +102,24 @@ void fsmonitor_signal_reload(void) {
     }
 }
 
+/* Get the kqueue file descriptor */
+int fsmonitor_get_kqueue_fd(void) {
+    return g_kqueue_fd;
+}
+
 /* Return the current count of monitored directories */
 int get_monitored_dir_count(void) {
     return num_monitored_dirs;
 }
 
-/* Get the kqueue file descriptor */
-int fsmonitor_get_kqueue_fd(void) {
-    return g_kqueue_fd;
+/* Helper function to check if directory is already being monitored */
+bool is_directory_monitored(const char *path) {
+    for (int i = 0; i < num_monitored_dirs; i++) {
+        if (strcmp(monitored_dirs[i].path, path) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Register a directory with kqueue */
@@ -290,35 +212,6 @@ static void handle_directory_event(const struct kevent *event, monitored_dir_t *
     events_handle(path, md->plex_section_id);
 }
 
-/* Process a single event */
-static void process_event(const struct kevent *event) {
-    /* Check for user events */
-    if (event->filter == EVFILT_USER && event->ident == g_user_event_ident) {
-        
-        uint32_t data = event->data;
-        
-        if (data == USER_EVENT_EXIT) {
-            g_running = 0;
-            log_message(LOG_INFO, "Received exit event");
-        } else if (data == USER_EVENT_RELOAD) {
-            log_message(LOG_INFO, "Received reload event, reloading configuration");
-            config_load(DEFAULT_CONFIG_FILE);
-        }
-        
-        return;
-    }
-
-    if (event->flags & EV_ERROR) {
-        log_message(LOG_ERR, "Event error: %s", strerror(event->data));
-        return;
-    }
-
-    monitored_dir_t *md = (monitored_dir_t *)event->udata;
-    if (!md || !event->fflags) return;
-
-    handle_directory_event(event, md);
-}
-
 /* Calculate the timeout for the next scan */
 static void calculate_timeout(time_t next_scan, struct timespec *timeout) {
     time_t now = time(NULL);
@@ -347,137 +240,36 @@ void fsmonitor_process_events(void) {
     
     /* Process received events */
     for (int i = 0; i < nev; i++) {
-        process_event(&events[i]);
+        const struct kevent *event = &events[i];
+        
+        /* Check for user events */
+        if (event->filter == EVFILT_USER && event->ident == g_user_event_ident) {
+            uint32_t data = event->data;
+            
+            if (data == USER_EVENT_EXIT) {
+                g_running = 0;  /* Signal to exit the main loop */
+                log_message(LOG_INFO, "Received exit event");
+            } else if (data == USER_EVENT_RELOAD) {
+                log_message(LOG_INFO, "Received reload event, reloading configuration");
+                config_load(DEFAULT_CONFIG_FILE);
+            }
+            
+            continue;
+        }
+
+        if (event->flags & EV_ERROR) {
+            log_message(LOG_ERR, "Event error: %s", strerror(event->data));
+            continue;
+        }
+
+        monitored_dir_t *md = (monitored_dir_t *)event->udata;
+        if (!md || !event->fflags) continue;
+
+        handle_directory_event(event, md);
     }
     
     /* Process any pending scans that are ready */
     events_process_pending();
-}
-
-/* Helper function to get subdirectories */
-static char **get_subdirectories(const char *path, int *count) {
-    char **subdirs = dircache_get_subdirs(path, count);
-    
-    if (!subdirs) {
-        /* Cache miss, update it and try again */
-        bool dir_changed = false;
-        if (dircache_refresh(path, &dir_changed)) {
-            subdirs = dircache_get_subdirs(path, count);
-        }
-        
-        if (!subdirs) {
-            log_message(LOG_DEBUG, "No subdirectories found for %s", path);
-            *count = 0;
-            return NULL;
-        }
-    }
-    
-    return subdirs;
-}
-
-/* Helper function to check if directory is already being monitored */
-static bool is_directory_monitored(const char *path) {
-    for (int i = 0; i < num_monitored_dirs; i++) {
-        if (strcmp(monitored_dirs[i].path, path) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* Helper function for processing directories */
-static bool process_directory_queue(dir_queue_t *queue, int section_id, bool scan_mode) {
-    char current_path[PATH_MAX_LEN];
-    int new_dirs_count = 0;
-
-    while (!queue_is_empty(queue)) {
-        if (!queue_dequeue(queue, current_path)) break;
-        
-        /* Common monitoring check */
-        if (!is_directory_monitored(current_path) && !scan_mode) {
-            int dir_idx = fsmonitor_add_directory(current_path, section_id);
-            if (dir_idx < 0) continue;
-            log_message(LOG_DEBUG, "Added directory %s to monitoring", current_path);
-        }
-        
-        /* Common subdirectory processing */
-        int subdir_count = 0;
-        char **subdirs = get_subdirectories(current_path, &subdir_count);
-        if (!subdirs) continue;
-        
-        for (int i = 0; i < subdir_count; i++) {
-            if (scan_mode && is_directory_monitored(subdirs[i])) continue;
-            
-            if (scan_mode) {
-                int dir_idx = fsmonitor_add_directory(subdirs[i], section_id);
-                if (dir_idx >= 0) {
-                    new_dirs_count++;
-                    log_message(LOG_DEBUG, "Added new directory %s to monitoring", subdirs[i]);
-                }
-            }
-            
-            if (!queue_enqueue(queue, subdirs[i])) {
-                log_message(LOG_ERR, "Directory queue allocation failed");
-                dircache_free_subdirs(subdirs, subdir_count);
-                queue_free(queue);
-                return false;
-            }
-        }
-        dircache_free_subdirs(subdirs, subdir_count);
-    }
-    
-    return new_dirs_count;
-}
-
-/* Recursively add a directory and its subdirectories to the watch list */
-bool watch_directory_tree(const char *dir_path, int section_id) {
-    dir_queue_t queue;
-    queue_init(&queue);
-
-    if (!queue_enqueue(&queue, dir_path)) {
-        log_message(LOG_ERR, "Directory queue allocation failed");
-        return false;
-    }
-
-    log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
-    process_directory_queue(&queue, section_id, false);
-    queue_free(&queue);
-    return true;
-}
-
-/* Detect and register new subdirectories */
-int scan_new_directories(const char *dir_path, int section_id) {
-    dir_queue_t queue;
-    queue_init(&queue);
-    int new_dirs_count = 0;
-
-    if (!queue_enqueue(&queue, dir_path)) {
-        log_message(LOG_ERR, "Directory queue allocation failed");
-        return 0;
-    }
-
-    log_message(LOG_DEBUG, "Detecting new subdirectories starting from %s", dir_path);
-    new_dirs_count = process_directory_queue(&queue, section_id, true);
-    
-    if (new_dirs_count > 0) {
-        log_message(LOG_INFO, "Added %d new directories under %s", 
-                   new_dirs_count, dir_path);
-    }
-
-    queue_free(&queue);
-    return new_dirs_count;
-}
-
-/* Check if a path is a directory */
-bool is_directory(const char *path) {
-    struct stat st;
-    
-    if (stat(path, &st) == -1) {
-        log_message(LOG_ERR, "Failed to stat %s: %s", path, strerror(errno));
-        return false;
-    }
-    
-    return S_ISDIR(st.st_mode);
 }
 
 /* Run the filesystem event monitor loop */

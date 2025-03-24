@@ -44,24 +44,29 @@
 /* Maximum length for Plex token */
 #define TOKEN_MAX_LEN 128
 
+/* User event identifiers */
+#define USER_EVENT_EXIT    1
+#define USER_EVENT_RELOAD  2
+static uintptr_t g_user_event_ident = 0;
+
 /* Structure to hold a monitored directory */
 typedef struct {
-    int fd;                   /* File descriptor */
-    char path[PATH_MAX_LEN];  /* Path to the directory */
-    int plex_section_id;      /* Associated Plex library section ID */
+    int fd;                         /* File descriptor */
+    char path[PATH_MAX_LEN];        /* Path to the directory */
+    int plex_section_id;            /* Associated Plex library section ID */
 } monitored_dir_t;
 
 /* Structure to hold configuration */
 typedef struct {
-    char plex_url[PATH_MAX_LEN];
-    char plex_token[TOKEN_MAX_LEN];
+    char plex_url[PATH_MAX_LEN];       /* Base URL of the Plex Media Server */
+    char plex_token[TOKEN_MAX_LEN];    /* Authentication token for Plex API access */
     char *directories[MAX_EVENT_FDS];  /* List of directories to monitor */
-    char log_file[PATH_MAX_LEN];
-    int startup_timeout;     /* Maximum time to wait for Plex in seconds */
-    int num_directories;
-    int log_level;          /* Log level threshold */
-    bool verbose;           /* Verbose output flag */
-    bool daemonize;         /* Run as daemon */
+    char log_file[PATH_MAX_LEN];       /* Path to the log file for daemon mode */
+    int startup_timeout;               /* Maximum time to wait for Plex in seconds */
+    int num_directories;               /* Number of directories in the directories array */
+    int log_level;                     /* Log level threshold */
+    bool verbose;                      /* Verbose output flag */
+    bool daemonize;                    /* Run as daemon */
 } config_t;
 
 /* Global configuration */
@@ -88,6 +93,7 @@ void fsmonitor_signal_reload(void);
 int fsmonitor_get_kqueue_fd(void);
 int fsmonitor_add_directory(const char *path, int plex_section_id);
 int get_monitored_dir_count(void);
+bool is_directory_monitored(const char *path);
 
 /* Plex API */
 bool plexapi_init(void);
