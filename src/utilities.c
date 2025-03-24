@@ -120,85 +120,133 @@ static char **get_subdirectories(const char *path, int *count) {
     return subdirs;
 }
 
-/* Helper function for processing directories */
-static int process_directory_queue(dir_queue_t *queue, int section_id, bool scan_mode) {
-    char current_path[PATH_MAX_LEN];
-    int new_dirs_count = 0;
-
-    while (!queue_is_empty(queue)) {
-        if (!queue_dequeue(queue, current_path)) break;
-        
-        /* Common monitoring check */
-        if (!is_directory_monitored(current_path) && !scan_mode) {
-            int dir_idx = fsmonitor_add_directory(current_path, section_id);
-            if (dir_idx < 0) continue;
-            log_message(LOG_DEBUG, "Added directory %s to monitoring", current_path);
-        }
-        
-        /* Common subdirectory processing */
-        int subdir_count = 0;
-        char **subdirs = get_subdirectories(current_path, &subdir_count);
-        if (!subdirs) continue;
-        
-        for (int i = 0; i < subdir_count; i++) {
-            if (scan_mode && is_directory_monitored(subdirs[i])) continue;
-            
-            if (scan_mode) {
-                int dir_idx = fsmonitor_add_directory(subdirs[i], section_id);
-                if (dir_idx >= 0) {
-                    new_dirs_count++;
-                    log_message(LOG_DEBUG, "Added new directory %s to monitoring", subdirs[i]);
-                }
-            }
-            
-            if (!queue_enqueue(queue, subdirs[i])) {
-                log_message(LOG_ERR, "Directory queue allocation failed");
-                dircache_free_subdirs(subdirs, subdir_count);
-                queue_free(queue);
-                return false;
-            }
-        }
-        dircache_free_subdirs(subdirs, subdir_count);
-    }
-    
-    return new_dirs_count;
-}
-
 /* Recursively add a directory and its subdirectories to the watch list */
 bool watch_directory_tree(const char *dir_path, int section_id) {
     dir_queue_t queue;
+    char current_path[PATH_MAX_LEN];
+    
+    /* Initialize queue */
     queue_init(&queue);
-
+    
+    /* Start with the initial directory */
     if (!queue_enqueue(&queue, dir_path)) {
-        log_message(LOG_ERR, "Directory queue allocation failed");
+        log_message(LOG_ERR, "Failed to allocate memory for directory queue");
         return false;
     }
-
+    
     log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
-    process_directory_queue(&queue, section_id, false);
+    
+    /* Process directories from the queue */
+    while (!queue_is_empty(&queue)) {
+        if (!queue_dequeue(&queue, current_path)) {
+            break;  /* Should not happen */
+        }
+        
+        /* Add current directory to monitoring if not already monitored */
+        if (!is_directory_monitored(current_path)) {
+            int dir_idx = fsmonitor_add_directory(current_path, section_id);
+            if (dir_idx < 0) {
+                log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+                continue;
+            }
+            log_message(LOG_DEBUG, "Added directory %s to monitoring", current_path);
+        }
+        
+        /* Get subdirectories */
+        int subdir_count = 0;
+        char **subdirs = get_subdirectories(current_path, &subdir_count);
+        
+        if (!subdirs) {
+            continue;  /* No subdirectories or error */
+        }
+        
+        /* Add all subdirectories to queue */
+        for (int i = 0; i < subdir_count; i++) {
+            if (!queue_enqueue(&queue, subdirs[i])) {
+                log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+                dircache_free_subdirs(subdirs, subdir_count);
+                queue_free(&queue);
+                return false;
+            }
+        }
+        
+        /* Free subdirectory list */
+        dircache_free_subdirs(subdirs, subdir_count);
+    }
+    
+    /* Clean up queue */
     queue_free(&queue);
+    
     return true;
 }
 
 /* Detect and register new subdirectories */
 int scan_new_directories(const char *dir_path, int section_id) {
     dir_queue_t queue;
-    queue_init(&queue);
+    char current_path[PATH_MAX_LEN];
     int new_dirs_count = 0;
-
+    
+    /* Initialize queue */
+    queue_init(&queue);
+    
+    /* Start with the initial directory */
     if (!queue_enqueue(&queue, dir_path)) {
-        log_message(LOG_ERR, "Directory queue allocation failed");
+        log_message(LOG_ERR, "Failed to allocate memory for directory queue");
         return 0;
     }
-
+    
     log_message(LOG_DEBUG, "Detecting new subdirectories starting from %s", dir_path);
-    new_dirs_count = process_directory_queue(&queue, section_id, true);
+    
+    /* Process directories from the queue */
+    while (!queue_is_empty(&queue)) {
+        if (!queue_dequeue(&queue, current_path)) {
+            break;  /* Should not happen */
+        }
+        
+        /* Get subdirectories */
+        int subdir_count = 0;
+        char **subdirs = get_subdirectories(current_path, &subdir_count);
+        
+        if (!subdirs) {
+            continue;  /* No subdirectories or error */
+        }
+        
+        /* Check each subdirectory */
+        for (int i = 0; i < subdir_count; i++) {
+            /* Skip if already monitored */
+            if (is_directory_monitored(subdirs[i])) {
+                continue;
+            }
+            
+            /* Add this new directory to monitoring */
+            int dir_idx = fsmonitor_add_directory(subdirs[i], section_id);
+            if (dir_idx >= 0) {
+                new_dirs_count++;
+                log_message(LOG_DEBUG, "Added new directory %s to monitoring", subdirs[i]);
+                
+                /* Add this directory to the queue for further processing */
+                if (!queue_enqueue(&queue, subdirs[i])) {
+                    log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+                    dircache_free_subdirs(subdirs, subdir_count);
+                    queue_free(&queue);
+                    return new_dirs_count;
+                }
+            } else {
+                log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
+            }
+        }
+        
+        /* Free subdirectory list */
+        dircache_free_subdirs(subdirs, subdir_count);
+    }
+    
+    /* Clean up queue */
+    queue_free(&queue);
     
     if (new_dirs_count > 0) {
-        log_message(LOG_INFO, "Added %d new directories under %s", 
+        log_message(LOG_INFO, "Added %d new directories under %s to monitoring", 
                    new_dirs_count, dir_path);
     }
-
-    queue_free(&queue);
+    
     return new_dirs_count;
 }

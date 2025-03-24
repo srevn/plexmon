@@ -108,6 +108,7 @@ void events_cleanup(void);
 void events_handle(const char *path, int section_id);
 void events_process_pending(void);
 time_t next_scheduled_scan(void);
+void calculate_timeout(time_t next_scan, struct timespec *timeout);
 
 /* Logging */
 bool log_init(void);

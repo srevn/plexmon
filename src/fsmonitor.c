@@ -181,44 +181,38 @@ int fsmonitor_add_directory(const char *path, int plex_section_id) {
 }
 
 /* Handle directory events */
-static void handle_directory_event(const struct kevent *event, monitored_dir_t *md) {
+static void handle_directory_event(monitored_dir_t *md, int fflags) {
+    if (!(fflags & NOTE_WRITE)) return;
     
-    if (!(event->fflags & NOTE_WRITE)) return;
-
-    const char *path = md->path;
-    log_message(LOG_INFO, "Change detected in directory: %s", path);
-
-    if (!is_directory(path)) return;
+    log_message(LOG_INFO, "Change detected in directory: %s", md->path);
     
-    /* Directory cache with mtime checking */
-    bool dir_changed = false;
-    if (!dircache_refresh(path, &dir_changed)) {
-        log_message(LOG_WARNING, "Failed to check directory cache for %s, using targeted refresh", path);
-        scan_new_directories(path, md->plex_section_id);
+    /* Check for new subdirectories that need to be monitored */
+    if (!is_directory(md->path)) {
+        events_handle(md->path, md->plex_section_id);
         return;
     }
-
-    if (dir_changed) {
-        log_message(LOG_DEBUG, "Directory structure changed in %s, detecting new subdirectories", path);
-        /* Only register new subdirectories instead of full tree rescanning */
-        int new_dirs = scan_new_directories(path, md->plex_section_id);
-        log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, path);
+    
+    bool dir_changed = false;
+    
+    /* Directory cache with mtime checking */
+    if (dircache_refresh(md->path, &dir_changed)) {
+        if (dir_changed) {
+            log_message(LOG_DEBUG, "Directory structure changed in %s, detecting new subdirectories", md->path);
+            /* Register new subdirectories */
+            int new_dirs = scan_new_directories(md->path, md->plex_section_id);
+            log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, md->path);
+        } else {
+            /* Still queue a Plex scan but skip directory tree rescanning */
+            log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
+        }
     } else {
-        /* Still queue a Plex scan but skip directory tree rescanning */
-        log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan", path);
+        /* Cache check failed, fall back to targeted refresh */
+        log_message(LOG_WARNING, "Failed to check directory cache for %s, using targeted refresh", md->path);
+        scan_new_directories(md->path, md->plex_section_id);
     }
     
     /* Queue event */
-    events_handle(path, md->plex_section_id);
-}
-
-/* Calculate the timeout for the next scan */
-static void calculate_timeout(time_t next_scan, struct timespec *timeout) {
-    time_t now = time(NULL);
-    time_t time_left = next_scan > now ? next_scan - now : 0;
-    
-    timeout->tv_sec = time_left;
-    timeout->tv_nsec = 0;
+    events_handle(md->path, md->plex_section_id);
 }
 
 /* Process events from kqueue */
@@ -228,23 +222,23 @@ void fsmonitor_process_events(void) {
     int nev;
     
     calculate_timeout(next_scheduled_scan(), &timeout);
-
+    
     /* Indefinite wait if no scans and no events */
     nev = kevent(g_kqueue_fd, NULL, 0, events, MAX_EVENT_FDS,
                 (timeout.tv_sec == 0 && timeout.tv_nsec == 0) ? NULL : &timeout);
     
-    if (nev == -1 && errno != EINTR) {
-        log_message(LOG_ERR, "Error in kevent: %s", strerror(errno));
+    if (nev == -1) {
+        if (errno != EINTR) {
+            log_message(LOG_ERR, "Error in kevent: %s", strerror(errno));
+        }
         return;
     }
     
     /* Process received events */
     for (int i = 0; i < nev; i++) {
-        const struct kevent *event = &events[i];
-        
         /* Check for user events */
-        if (event->filter == EVFILT_USER && event->ident == g_user_event_ident) {
-            uint32_t data = event->data;
+        if (events[i].filter == EVFILT_USER && events[i].ident == g_user_event_ident) {
+            uint32_t data = events[i].data;
             
             if (data == USER_EVENT_EXIT) {
                 g_running = 0;  /* Signal to exit the main loop */
@@ -253,19 +247,19 @@ void fsmonitor_process_events(void) {
                 log_message(LOG_INFO, "Received reload event, reloading configuration");
                 config_load(DEFAULT_CONFIG_FILE);
             }
-            
             continue;
         }
-
-        if (event->flags & EV_ERROR) {
-            log_message(LOG_ERR, "Event error: %s", strerror(event->data));
+        
+        monitored_dir_t *md = (monitored_dir_t *)events[i].udata;
+        
+        if (events[i].flags & EV_ERROR) {
+            log_message(LOG_ERR, "Event error: %s", strerror(events[i].data));
             continue;
         }
-
-        monitored_dir_t *md = (monitored_dir_t *)event->udata;
-        if (!md || !event->fflags) continue;
-
-        handle_directory_event(event, md);
+        
+        if (md && events[i].fflags) {
+            handle_directory_event(md, events[i].fflags);
+        }
     }
     
     /* Process any pending scans that are ready */

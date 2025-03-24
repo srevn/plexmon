@@ -167,6 +167,15 @@ time_t next_scheduled_scan(void) {
     return next_time;
 }
 
+/* Calculate the timeout for the next scan */
+void calculate_timeout(time_t next_scan, struct timespec *timeout) {
+    time_t now = time(NULL);
+    time_t time_left = next_scan > now ? next_scan - now : 0;
+    
+    timeout->tv_sec = time_left;
+    timeout->tv_nsec = 0;
+}
+
 /* Remove completed scans from the array */
 static void cleanup_completed_scans(void) {
     int i, j;
