@@ -34,32 +34,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     return realsize;
 }
 
-/* Initializes a CURL response structure */
-static bool init_curl_response(curl_response_t *response) {
-    response->data = malloc(1);
-    if (!response->data) {
-        log_message(LOG_ERR, "Memory allocation failed for CURL response");
-        return false;
-    }
-    response->size = 0;
-    return true;
-}
-
-/* Sets up common CURL request headers */
-static struct curl_slist *create_request_headers(void) {
-    struct curl_slist *headers = NULL;
-    
-    headers = curl_slist_append(headers, "Accept: application/json");
-    
-    if (strlen(g_config.plex_token) > 0) {
-        char auth_header[TOKEN_MAX_LEN + 20];
-        snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
-        headers = curl_slist_append(headers, auth_header);
-    }
-    
-    return headers;
-}
-
 /* Initialize Plex API client */
 bool plexapi_init(void) {
     log_message(LOG_INFO, "Initializing Plex API client");
@@ -112,7 +86,13 @@ bool check_plex_connection(void) {
     snprintf(url, sizeof(url), "%s/identity", g_config.plex_url);
     
     /* Set up headers */
-    headers = create_request_headers();
+    headers = curl_slist_append(headers, "Accept: application/json");
+    
+    if (strlen(g_config.plex_token) > 0) {
+        char auth_header[TOKEN_MAX_LEN + 20];
+        snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+        headers = curl_slist_append(headers, auth_header);
+    }
     
     /* Set curl options */
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
@@ -123,10 +103,13 @@ bool check_plex_connection(void) {
     
     do {
         /* Initialize response struct */
-        if (!init_curl_response(&response)) {
+        response.data = malloc(1);
+        if (!response.data) {
             curl_slist_free_all(headers);
+            log_message(LOG_ERR, "Memory allocation failed");
             return false;
         }
+        response.size = 0;
         
         curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&response);
         
@@ -157,7 +140,7 @@ bool check_plex_connection(void) {
         if (current_time - start_time >= g_config.startup_timeout) {
             curl_slist_free_all(headers);
             log_message(LOG_ERR, "Connection timeout reached after %d seconds", 
-                    g_config.startup_timeout);
+                       g_config.startup_timeout);
             return false;
         }
         
@@ -183,6 +166,7 @@ static bool process_library_section(json_object *section) {
         log_message(LOG_WARNING, "Library section missing 'key' field");
         return false;
     }
+    
     section_id = json_object_get_int(section_obj);
     
     /* Get locations for this section */
@@ -222,9 +206,9 @@ bool plexapi_get_libraries(void) {
     curl_response_t response;
     char url[1024];
     struct curl_slist *headers = NULL;
-    json_object *root = NULL, *container = NULL, *sections = NULL;
+    json_object *root, *container, *sections, *section;
     CURLcode res;
-    bool success = false;
+    bool success = true;
     
     log_message(LOG_INFO, "Retrieving library sections from Plex");
     
@@ -240,15 +224,20 @@ bool plexapi_get_libraries(void) {
     }
     
     /* Initialize response struct */
-    if (!init_curl_response(&response)) {
-        return false;
-    }
+    response.data = malloc(1);
+    response.size = 0;
     
     /* Construct request URL */
     snprintf(url, sizeof(url), "%s/library/sections", g_config.plex_url);
     
-    /* Set up headers and request */
-    headers = create_request_headers();
+    /* Set up headers */
+    headers = curl_slist_append(headers, "Accept: application/json");
+    
+    char auth_header[TOKEN_MAX_LEN + 20];
+    snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+    headers = curl_slist_append(headers, auth_header);
+    
+    /* Set curl options */
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
     curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&response);
@@ -277,30 +266,22 @@ bool plexapi_get_libraries(void) {
     if (!json_object_object_get_ex(root, "MediaContainer", &container) ||
         !json_object_object_get_ex(container, "Directory", &sections)) {
         log_message(LOG_ERR, "Invalid JSON response structure");
-        goto cleanup;
+        json_object_put(root);
+        free(response.data);
+        return false;
     }
     
     /* Process each library section */
     int num_sections = json_object_array_length(sections);
     log_message(LOG_INFO, "Found %d library sections", num_sections);
     
-    int sections_added = 0;
     for (int i = 0; i < num_sections; i++) {
-        json_object *section = json_object_array_get_idx(sections, i);
-        if (process_library_section(section)) {
-            sections_added++;
+        section = json_object_array_get_idx(sections, i);
+        if (!process_library_section(section)) {
+            success = false;
         }
     }
     
-    if (sections_added > 0) {
-        success = true;
-        log_message(LOG_DEBUG, "Successfully added %d of %d library sections", 
-                sections_added, num_sections);
-    } else {
-        log_message(LOG_WARNING, "No library sections were successfully added");
-    }
-    
-cleanup:
     /* Clean up */
     json_object_put(root);
     free(response.data);
@@ -314,7 +295,6 @@ bool plexapi_trigger_scan(const char *path, int section_id) {
     char url[1024];
     struct curl_slist *headers = NULL;
     CURLcode res;
-    bool success = false;
     
     log_message(LOG_DEBUG, "Triggering Plex scan for path: %s (section %d)", path, section_id);
     
@@ -324,24 +304,29 @@ bool plexapi_trigger_scan(const char *path, int section_id) {
     }
     
     /* Initialize response struct */
-    if (!init_curl_response(&response)) {
-        return false;
-    }
+    response.data = malloc(1);
+    response.size = 0;
     
     /* Construct request URL with path encoded */
     char *escaped_path = curl_easy_escape(curl_handle, path, 0);
-    if (!escaped_path) {
+    if (escaped_path) {
+        snprintf(url, sizeof(url), "%s/library/sections/%d/refresh?path=%s", 
+                g_config.plex_url, section_id, escaped_path);
+        curl_free(escaped_path);
+    } else {
         log_message(LOG_ERR, "Failed to URL encode path");
         free(response.data);
         return false;
     }
     
-    snprintf(url, sizeof(url), "%s/library/sections/%d/refresh?path=%s", 
-            g_config.plex_url, section_id, escaped_path);
-    curl_free(escaped_path);
+    /* Set up headers */
+    headers = curl_slist_append(headers, "Accept: application/json");
     
-    /* Set up headers and request */
-    headers = create_request_headers();
+    char auth_header[TOKEN_MAX_LEN + 20];
+    snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+    headers = curl_slist_append(headers, auth_header);
+    
+    /* Set curl options */
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
     curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&response);
@@ -358,11 +343,9 @@ bool plexapi_trigger_scan(const char *path, int section_id) {
         return false;
     }
     
-    success = true;
-    log_message(LOG_DEBUG, "Successfully triggered scan for %s", path);
-    
     /* Clean up */
     free(response.data);
     
-    return success;
+    log_message(LOG_DEBUG, "Successfully triggered scan for %s", path);
+    return true;
 }
