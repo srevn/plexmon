@@ -77,14 +77,6 @@ bool config_load(const char *config_path) {
                 strncpy(g_config.log_file, value, PATH_MAX_LEN - 1);
                 g_config.log_file[PATH_MAX_LEN - 1] = '\0';
             }
-            else if (strncmp(k, "directory", 9) == 0) {
-                if (g_config.num_directories < MAX_EVENT_FDS) {
-                    g_config.directories[g_config.num_directories] = strdup(value);
-                    g_config.num_directories++;
-                } else {
-                    log_message(LOG_WARNING, "Maximum number of directories reached");
-                }
-            }
             else {
                 log_message(LOG_WARNING, "Unknown configuration option: %s", k);
             }
@@ -106,15 +98,4 @@ bool config_load(const char *config_path) {
     }
     
     return true;
-}
-
-/* Free allocated configuration resources */
-void config_free(void) {
-    for (int i = 0; i < g_config.num_directories; i++) {
-        if (g_config.directories[i]) {
-            free(g_config.directories[i]);
-            g_config.directories[i] = NULL;
-        }
-    }
-    g_config.num_directories = 0;
 }

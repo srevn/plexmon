@@ -24,7 +24,3 @@ log_level=info
 
 # Log file path (only used when running as daemon)
 log_file=/var/log/plexmon.log
-
-# Additional directories to monitor (optional)
-# directory1=/path/to/additional/directory
-# directory2=/path/to/another/directory

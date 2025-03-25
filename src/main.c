@@ -296,7 +296,6 @@ static void cleanup(void) {
     events_cleanup();
     dircache_cleanup();
     plexapi_cleanup();
-    config_free();
 }
 
 /**

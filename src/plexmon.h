@@ -60,10 +60,8 @@ typedef struct {
 typedef struct {
     char plex_url[PATH_MAX_LEN];       /* Base URL of the Plex Media Server */
     char plex_token[TOKEN_MAX_LEN];    /* Authentication token for Plex API access */
-    char *directories[MAX_EVENT_FDS];  /* List of directories to monitor */
     char log_file[PATH_MAX_LEN];       /* Path to the log file for daemon mode */
     int startup_timeout;               /* Maximum time to wait for Plex in seconds */
-    int num_directories;               /* Number of directories in the directories array */
     int log_level;                     /* Log level threshold */
     bool verbose;                      /* Verbose output flag */
     bool daemonize;                    /* Run as daemon */
