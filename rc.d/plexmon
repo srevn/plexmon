@@ -18,6 +18,7 @@ load_rc_config $name
 logfile="/var/log/${name}.log"
 
 command="/usr/local/bin/plexmon"
+command_args="-d"
 
 start_precmd="${name}_precmd"
 extra_commands="reload"

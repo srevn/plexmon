@@ -11,12 +11,6 @@ plex_token=YOUR_PLEX_TOKEN_HERE
 # Maximum time to wait for Plex server at startup (in seconds)
 startup_timeout=60
 
-# Run in verbose mode (true/false)
-verbose=true
-
-# Run as daemon (true/false)
-daemonize=false
-
 # Log level (info or debug)
 # debug - Show all messages (most verbose)
 # info - Show normal information, warnings and errors (default)
