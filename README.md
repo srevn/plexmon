@@ -33,11 +33,11 @@ cd plexmon
 make
 
 # Install
-sudo make install
+make install
 
 # Create and edit configuration
-sudo cp /usr/local/etc/plexmon.conf.sample /usr/local/etc/plexmon.conf
-sudo vi /usr/local/etc/plexmon.conf
+cp /usr/local/etc/plexmon.conf.sample /usr/local/etc/plexmon.conf
+vi /usr/local/etc/plexmon.conf
 ```
 
 ## Configuration
@@ -53,12 +53,6 @@ plex_token=YOUR_PLEX_TOKEN_HERE
 
 # Maximum time to wait for Plex server at startup (in seconds)
 startup_timeout=60
-
-# Run in verbose mode
-verbose=true
-
-# Run as daemon
-daemonize=false
 
 # Log level (info or debug)
 log_level=info
