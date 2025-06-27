@@ -33,10 +33,10 @@
 #define DEFAULT_LOG_LEVEL LOG_INFO
 
 /* Maximum number of simultaneous events to monitor */
-#define MAX_EVENT_FDS 2048
+#define MAX_EVENT_FDS 4096
 
 /* Hash table for directory cache */
-#define HASH_TABLE_SIZE 2048 
+#define HASH_TABLE_SIZE 4096
 
 /* Maximum length for paths */
 #define PATH_MAX_LEN 1024
