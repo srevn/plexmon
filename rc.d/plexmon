@@ -14,11 +14,12 @@ load_rc_config $name
 : ${plexmon_enable:="NO"}
 : ${plexmon_user:="plex"}
 : ${plexmon_group:="plex"}
+: ${plexmon_config:="/usr/local/etc/plexmon.conf"}
 
 logfile="/var/log/${name}.log"
 
 command="/usr/local/bin/plexmon"
-command_args="-d"
+command_args="-d -c ${plexmon_config}"
 
 start_precmd="${name}_precmd"
 extra_commands="reload"
