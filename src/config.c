@@ -51,6 +51,9 @@ bool config_load(const char *config_path) {
                 strncpy(g_config.plex_token, value, TOKEN_MAX_LEN - 1);
                 g_config.plex_token[TOKEN_MAX_LEN - 1] = '\0';
             }
+            else if (strcmp(k, "scan_interval") == 0) {
+                g_config.scan_interval = atoi(value);
+            }
             else if (strcmp(k, "startup_timeout") == 0) {
                 g_config.startup_timeout = atoi(value);
             }
@@ -82,9 +85,15 @@ bool config_load(const char *config_path) {
     }
 
     if (g_config.startup_timeout <= 0) {
-        log_message(LOG_WARNING, "Invalid startup_timeout (%d), using default of 60s",
+        log_message(LOG_WARNING, "Invalid startup timeout (%d), using default of 60s",
                     g_config.startup_timeout);
         g_config.startup_timeout = 60;
+    }
+
+    if (g_config.scan_interval <= 0) {
+        log_message(LOG_WARNING, "Invalid scan interval (%d), using default of %ds",
+                    g_config.scan_interval, DEFAULT_SCAN_INTERVAL);
+        g_config.scan_interval = DEFAULT_SCAN_INTERVAL;
     }
 
     return true;

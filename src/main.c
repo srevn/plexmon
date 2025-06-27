@@ -68,16 +68,24 @@ int main(int argc, char *argv[]) {
     memset(&g_config, 0, sizeof(g_config));
     strcpy(g_config.plex_url, DEFAULT_PLEX_URL);
     strcpy(g_config.log_file, DEFAULT_LOG_FILE);
+    g_config.scan_interval = DEFAULT_SCAN_INTERVAL;
     g_config.startup_timeout = 60;
     g_config.verbose = false;
     g_config.daemonize = false;
     g_config.log_level = DEFAULT_LOG_LEVEL;
     
     /* Parse command line options */
-    while ((opt = getopt(argc, argv, "c:vdh")) != -1) {
+    while ((opt = getopt(argc, argv, "c:t:vdh")) != -1) {
         switch (opt) {
             case 'c':
                 config_path = optarg;
+                break;
+            case 't':
+                g_config.startup_timeout = atoi(optarg);
+                if (g_config.startup_timeout <= 0) {
+                    fprintf(stderr, "Invalid timeout value: %s\n", optarg);
+                    return EXIT_FAILURE;
+                }
                 break;
             case 'v':
                 g_config.verbose = true;

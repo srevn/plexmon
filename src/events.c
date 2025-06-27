@@ -98,7 +98,7 @@ static void find_child_pending_scans(const char *path, int *child_indices, int *
 void events_handle(const char *path, int section_id) {
     int idx, parent_idx;
     time_t now = time(NULL);
-    const int debounce_delay = 1; /* Default coalescing delay in seconds */
+    const int debounce_delay = g_config.scan_interval;
     
     /* First, check if there's already a pending scan for a parent directory */
     parent_idx = find_parent_pending_scan(path);
@@ -196,7 +196,7 @@ void events_process_pending(void) {
     for (int i = 0; i < num_pending_scans; i++) {
         if (pending_scans[i].is_pending && now >= pending_scans[i].scheduled_scan_time) {
             /* Time to execute this scan */
-            log_message(LOG_INFO, "Executing scan for %s (events coalesced for %lds)", 
+            log_message(LOG_INFO, "Executing scan for %s (scanning delayed for %lds)", 
                        pending_scans[i].path, 
                        now - pending_scans[i].first_event_time);
             

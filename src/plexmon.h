@@ -31,6 +31,7 @@
 #define DEFAULT_PLEX_URL "http://localhost:32400"
 #define DEFAULT_LOG_FILE "/var/log/plexmon.log"
 #define DEFAULT_LOG_LEVEL LOG_INFO
+#define DEFAULT_SCAN_INTERVAL 1
 
 /* Maximum number of simultaneous events to monitor */
 #define MAX_EVENT_FDS 4096
@@ -61,6 +62,7 @@ typedef struct {
     char plex_url[PATH_MAX_LEN];       /* Base URL of the Plex Media Server */
     char plex_token[TOKEN_MAX_LEN];    /* Authentication token for Plex API access */
     char log_file[PATH_MAX_LEN];       /* Path to the log file for daemon mode */
+    int scan_interval;                 /* Delay in seconds before triggering a scan */
     int startup_timeout;               /* Maximum time to wait for Plex in seconds */
     int log_level;                     /* Log level threshold */
     bool verbose;                      /* Verbose output flag */
