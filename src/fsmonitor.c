@@ -116,7 +116,21 @@ int get_monitored_dir_count(void) {
 bool is_directory_monitored(const char *path) {
     for (int i = 0; i < num_monitored_dirs; i++) {
         if (strcmp(monitored_dirs[i].path, path) == 0) {
-            return true;
+            
+            /* Verify the file descriptor is still valid for this directory */
+            struct stat fd_stat, path_stat;
+            bool fd_valid = (fstat(monitored_dirs[i].fd, &fd_stat) == 0);
+            bool path_exists = (stat(path, &path_stat) == 0);
+            bool same_dir = fd_valid && path_exists && 
+                           (fd_stat.st_dev == path_stat.st_dev && fd_stat.st_ino == path_stat.st_ino);
+            
+            if (monitored_dirs[i].fd >= 0 && same_dir) {
+                return true;
+            } else {
+                /* Directory was deleted/recreated or fd is invalid, remove from monitoring */
+                fsmonitor_remove_directory(i);
+                return false;
+            }
         }
     }
     return false;
@@ -141,6 +155,29 @@ static bool register_directory_with_kqueue(int fd, monitored_dir_t *dir_info) {
     }
     
     return true;
+}
+
+/* Remove a directory from the monitoring list */
+void fsmonitor_remove_directory(int index) {
+    if (index < 0 || index >= num_monitored_dirs) {
+        return;
+    }
+    
+    /* Close file descriptor if valid */
+    if (monitored_dirs[index].fd >= 0) {
+        close(monitored_dirs[index].fd);
+    }
+    
+    /* Shift remaining entries down */
+    for (int i = index; i < num_monitored_dirs - 1; i++) {
+        monitored_dirs[i] = monitored_dirs[i + 1];
+    }
+    
+    /* Clear the last entry */
+    memset(&monitored_dirs[num_monitored_dirs - 1], 0, sizeof(monitored_dir_t));
+    monitored_dirs[num_monitored_dirs - 1].fd = -1;
+    
+    num_monitored_dirs--;
 }
 
 /* Add a directory to the monitoring list */

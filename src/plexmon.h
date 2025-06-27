@@ -92,6 +92,7 @@ void fsmonitor_signal_exit(void);
 void fsmonitor_signal_reload(void);
 int fsmonitor_get_kqueue_fd(void);
 int fsmonitor_add_directory(const char *path, int plex_section_id);
+void fsmonitor_remove_directory(int index);
 int get_monitored_dir_count(void);
 bool is_directory_monitored(const char *path);
 

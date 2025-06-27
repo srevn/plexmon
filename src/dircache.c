@@ -263,7 +263,12 @@ static bool sync_directory_tree(const char *path, cached_dir_t *dir, bool *chang
             search_item.key = current->path;
             
             if (!hsearch_r(search_item, FIND, &result, &new_paths_htab)) {
-                log_message(LOG_DEBUG, "Subdirectory removed: %s", current->path);
+                /* Check if the directory actually still exists on filesystem */
+                if (is_directory(current->path)) {
+                    log_message(LOG_DEBUG, "Subdirectory removed from cache but still exists: %s", current->path);
+                } else {
+                    log_message(LOG_DEBUG, "Subdirectory removed: %s", current->path);
+                }
                 structure_changed = true;
                 break;
             }
