@@ -55,6 +55,8 @@ typedef struct {
     int fd;                         /* File descriptor */
     char path[PATH_MAX_LEN];        /* Path to the directory */
     int plex_section_id;            /* Associated Plex library section ID */
+    dev_t device;                   /* Device ID for validation */
+    ino_t inode;                    /* Inode number for validation */
 } monitored_dir_t;
 
 /* Structure to hold configuration */

@@ -117,14 +117,12 @@ bool is_directory_monitored(const char *path) {
     for (int i = 0; i < num_monitored_dirs; i++) {
         if (strcmp(monitored_dirs[i].path, path) == 0) {
             
-            /* Verify the file descriptor is still valid for this directory */
-            struct stat fd_stat, path_stat;
-            bool fd_valid = (fstat(monitored_dirs[i].fd, &fd_stat) == 0);
-            bool path_exists = (stat(path, &path_stat) == 0);
-            bool same_dir = fd_valid && path_exists && 
-                           (fd_stat.st_dev == path_stat.st_dev && fd_stat.st_ino == path_stat.st_ino);
-            
-            if (monitored_dirs[i].fd >= 0 && same_dir) {
+            /* Verify the directory still exists and is the same */
+            struct stat path_stat;
+            if (monitored_dirs[i].fd >= 0 && 
+                stat(path, &path_stat) == 0 &&
+                path_stat.st_dev == monitored_dirs[i].device &&
+                path_stat.st_ino == monitored_dirs[i].inode) {
                 return true;
             } else {
                 /* Directory was deleted/recreated or fd is invalid, remove from monitoring */
@@ -202,11 +200,21 @@ int fsmonitor_add_directory(const char *path, int plex_section_id) {
         return -1;
     }
     
+    /* Get directory stats for validation */
+    struct stat dir_stat;
+    if (fstat(fd, &dir_stat) == -1) {
+        log_message(LOG_ERR, "Failed to stat directory %s: %s", path, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    
     /* Add to monitored directories */
     monitored_dirs[num_monitored_dirs].fd = fd;
     strncpy(monitored_dirs[num_monitored_dirs].path, path, PATH_MAX_LEN - 1);
     monitored_dirs[num_monitored_dirs].path[PATH_MAX_LEN - 1] = '\0';
     monitored_dirs[num_monitored_dirs].plex_section_id = plex_section_id;
+    monitored_dirs[num_monitored_dirs].device = dir_stat.st_dev;
+    monitored_dirs[num_monitored_dirs].inode = dir_stat.st_ino;
     
     /* Register with kqueue */
     if (!register_directory_with_kqueue(fd, &monitored_dirs[num_monitored_dirs])) {
