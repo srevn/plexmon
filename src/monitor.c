@@ -362,6 +362,7 @@ int monitor_add(const char *path, int section_id) {
 	}
 
 	active_dir_count++;
+	log_message(LOG_DEBUG, "Added directory %s to monitoring", path);
 	return new_index;
 }
 
@@ -509,11 +510,9 @@ int monitor_scan(const char *dir_path, int section_id) {
 				continue;
 			}
 
-			/* Add this new directory to monitoring */
 			int dir_idx = monitor_add(subdirs[i], section_id);
 			if (dir_idx >= 0) {
 				new_dirs_count++;
-				log_message(LOG_DEBUG, "Added new directory %s to monitoring", subdirs[i]);
 
 				/* Add this directory to the queue for further processing */
 				if (!queue_enqueue(&queue, subdirs[i])) {
@@ -564,14 +563,10 @@ bool monitor_tree(const char *dir_path, int section_id) {
 			break; /* Should not happen */
 		}
 
-		/* Add current directory to monitoring if not already monitored and valid */
-		if (!monitor_validate(current_path)) {
-			int dir_idx = monitor_add(current_path, section_id);
-			if (dir_idx < 0) {
-				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-				continue;
-			}
-			log_message(LOG_DEBUG, "Added directory %s to monitoring", current_path);
+		/* Add current directory to monitoring */
+		if (monitor_add(current_path, section_id) < 0) {
+			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+			continue;
 		}
 
 		/* Get subdirectories */
