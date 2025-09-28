@@ -18,7 +18,7 @@ bool is_directory(const char *path, int d_type) {
 		}
 		/* For symlinks or unknown types, we must stat to be sure */
 		if (d_type != DT_LNK && d_type != DT_UNKNOWN) {
-			return false; /* It's a file, socket, etc. */
+			return false; /* It's a file, socket, etc */
 		}
 	}
 

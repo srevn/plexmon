@@ -60,21 +60,28 @@ void dircache_cleanup(void) {
 		cache_entry_tracker_t *to_free = entry_tracker_head;
 		entry_tracker_head = entry_tracker_head->next;
 
-		/* Free subdirectory entries */
-		dir_entry_t *entry = to_free->dir->subdirs;
-		while (entry) {
-			dir_entry_t *subdir_to_free = entry;
-			entry = entry->next;
-			free(subdir_to_free);
+		/* Free all data associated with the cached directory */
+		cached_dir_t *dir = to_free->dir;
+		if (dir) {
+			/* Free all the keys in the subdirectory hash table */
+			for (int i = 0; i < dir->subdir_count; i++) {
+				free(dir->keys[i]);
+			}
+			free(dir->keys);
+
+			/* Destroy the subdirectory hash table */
+			if (dir->validated) {
+				hdestroy_r(&dir->subdirs_htab);
+			}
 		}
 
-		/* Free directory entry and key */
+		/* Free directory entry and the main cache key */
 		free(to_free->key);
 		free(to_free->dir);
 		free(to_free);
 	}
 
-	/* Destroy hash table */
+	/* Destroy the main directory cache hash table */
 	hdestroy_r(&dir_cache_htab);
 	dir_cache_count = 0;
 }
@@ -105,202 +112,148 @@ static cached_dir_t *find_dir(const char *path) {
 	return NULL;
 }
 
+/* Helper function to manage the dynamic keys array for a cached directory */
+static bool add_key_to_dir(cached_dir_t *dir, char *key) {
+	if (dir->subdir_count >= dir->keys_capacity) {
+		int new_capacity = (dir->keys_capacity == 0) ? 16 : dir->keys_capacity * 2;
+		char **new_keys = realloc(dir->keys, new_capacity * sizeof(char *));
+		if (!new_keys) {
+			log_message(LOG_ERR, "Failed to reallocate keys array for dircache");
+			free(key); /* Avoid leaking the key we failed to add */
+			return false;
+		}
+		dir->keys = new_keys;
+		dir->keys_capacity = new_capacity;
+	}
+	dir->keys[dir->subdir_count++] = key;
+	return true;
+}
+
 /* Check if directory structure has changed and updates cache */
 static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	DIR *dirp;
 	struct dirent *entry;
 	char full_path[PATH_MAX_LEN];
-
-	/* Temporary structure to hold new directory information */
-	dir_entry_t *new_subdirs = NULL;
-	int new_subdir_count = 0;
-	bool structure_changed = false;
-
-	/* Hash tables for efficient path lookup */
-	struct hsearch_data new_paths_htab;
-	struct hsearch_data old_paths_htab;
-	bool htab_initialized = false;
-
 	*changed = false;
+
+	/* Temporary hash table for the current state on disk */
+	struct hsearch_data current_htab;
+	memset(&current_htab, 0, sizeof(current_htab));
+	if (!hcreate_r(512, &current_htab)) {
+		log_message(LOG_ERR, "Failed to create temporary hash table for sync: %s", strerror(errno));
+		return false;
+	}
+
+	char *current_keys[HASH_TABLE_SIZE] = { NULL };
+	int current_key_count = 0;
+	bool structure_changed = false;
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
-		*changed = true; /* Assume changed if we can't check */
+		hdestroy_r(&current_htab);
 		return false;
 	}
 
-	/* Initialize hash tables for path comparison */
-	memset(&new_paths_htab, 0, sizeof(new_paths_htab));
-	memset(&old_paths_htab, 0, sizeof(old_paths_htab));
-
-	/* Create hash tables with appropriate sizes - 512 entries should be enough for most directories */
-	if (!hcreate_r(512, &new_paths_htab) || !hcreate_r(512, &old_paths_htab)) {
-		log_message(LOG_ERR, "Failed to create hash tables for directory comparison: %s", strerror(errno));
-		closedir(dirp);
-		return false;
-	}
-	htab_initialized = true;
-
-	/* First, add existing subdirectories to old_paths_htab */
-	if (dir->validated) {
-		dir_entry_t *current = dir->subdirs;
-		while (current) {
-			ENTRY item, *result;
-			item.key = strdup(current->path);
-			if (!item.key) {
-				log_message(LOG_ERR, "Failed to allocate memory for path hash key");
-				structure_changed = true;
-				break;
-			}
-			item.data = current;
-
-			if (!hsearch_r(item, ENTER, &result, &old_paths_htab)) {
-				log_message(LOG_ERR, "Failed to add path to hash table: %s", strerror(errno));
-				free(item.key);			  /* Free the key if insertion fails */
-				structure_changed = true; /* Assume changed if we can't check properly */
-				break;
-			}
-
-			current = current->next;
-		}
-	} else {
-		structure_changed = true; /* Not validated, assume changed */
-	}
-
-	/* Scan for subdirectories and build new structure */
+	/* Scan disk and populate the temporary hash table */
 	while ((entry = readdir(dirp))) {
-		/* Skip . and .. */
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
 		}
 
-		/* Construct full path */
-		if (strlen(path) + strlen(entry->d_name) + 2 > PATH_MAX_LEN) {
-			log_message(LOG_WARNING, "Path too long: '%s/%s'", path, entry->d_name);
-			continue;
+		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+		if (is_directory(full_path, entry->d_type)) {
+			char *key = strdup(full_path);
+			if (!key) continue;
+
+			if (current_key_count < HASH_TABLE_SIZE) {
+				current_keys[current_key_count++] = key;
+			} else {
+				log_message(LOG_WARNING, "Exceeded max subdirectories for temp key tracking");
+				free(key);
+				continue;
+			}
+
+			ENTRY item = { key, (void *) 1 };
+			ENTRY *result;
+			hsearch_r(item, ENTER, &result, &current_htab);
 		}
+	}
+	closedir(dirp);
 
-		snprintf(full_path, PATH_MAX_LEN, "%s/%s", path, entry->d_name);
-
-		/* Process subdirectories */
-		if (is_directory(full_path, entry->d_type)) { /* Add path to hash table for quick lookups */
-			ENTRY item, *result;
-			char *path_key = strdup(full_path);
-			if (!path_key) {
-				log_message(LOG_ERR, "Failed to allocate memory for path hash key");
-				structure_changed = true;
-				continue;
-			}
-			item.key = path_key;
-			item.data = (void *) 1; /* Just a non-NULL marker */
-
-			if (!hsearch_r(item, ENTER, &result, &new_paths_htab)) {
-				log_message(LOG_ERR, "Failed to add path to hash table: %s", strerror(errno));
-				free(path_key);
-				structure_changed = true;
-				continue;
-			}
-
-			/* Create new entry */
-			dir_entry_t *new_entry = malloc(sizeof(dir_entry_t));
-			if (!new_entry) {
-				log_message(LOG_ERR, "Failed to allocate memory for subdirectory entry");
-				structure_changed = true;
-				continue;
-			}
-
-			/* Add subdirectory to new structure */
-			strncpy(new_entry->path, full_path, PATH_MAX_LEN - 1);
-			new_entry->path[PATH_MAX_LEN - 1] = '\0';
-			new_entry->next = new_subdirs;
-			new_subdirs = new_entry;
-			new_subdir_count++;
-
-			/* Check if this directory is in our existing cache */
-			if (dir->validated && !structure_changed) {
-				ENTRY search_item;
-				search_item.key = full_path;
-
-				if (!hsearch_r(search_item, FIND, &result, &old_paths_htab)) {
-					log_message(LOG_DEBUG, "New subdirectory found: %s", full_path);
+	/* Check for changes between cache and disk */
+	if (dir->validated) {
+		/* Check for count mismatch first for a quick exit */
+		if (dir->subdir_count != current_key_count) {
+			structure_changed = true;
+		} else {
+			/* If counts match, check for any new directories */
+			for (int i = 0; i < current_key_count; i++) {
+				ENTRY search_item = { current_keys[i], NULL };
+				ENTRY *result = NULL;
+				if (!hsearch_r(search_item, FIND, &result, &dir->subdirs_htab)) {
 					structure_changed = true;
+					break;
 				}
 			}
 		}
-	}
-
-	closedir(dirp);
-
-	/* Check for count mismatch */
-	if (!structure_changed && dir->validated && new_subdir_count != dir->subdir_count) {
-		log_message(LOG_DEBUG, "Subdirectory count changed: %d -> %d",
-					dir->subdir_count, new_subdir_count);
+	} else {
+		/* Not validated, so always update */
 		structure_changed = true;
 	}
 
-	/* Check for deleted subdirectories */
-	if (!structure_changed && dir->validated) {
-		dir_entry_t *current = dir->subdirs;
-		while (current && !structure_changed) {
-			ENTRY search_item;
-			ENTRY *result;
-
-			search_item.key = current->path;
-
-			if (!hsearch_r(search_item, FIND, &result, &new_paths_htab)) {
-				/* Check if the directory actually still exists on filesystem */
-				if (is_directory(current->path, D_TYPE_UNAVAILABLE)) {
-					log_message(LOG_DEBUG, "Subdirectory removed from cache but still exists: %s", current->path);
-				} else {
-					log_message(LOG_DEBUG, "Subdirectory removed: %s", current->path);
-				}
-				structure_changed = true;
-				break;
-			}
-
-			current = current->next;
-		}
-	}
-
+	/* If changed, rebuild the cache entry from the disk scan */
 	if (structure_changed) {
 		log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
+		*changed = true;
 
-		/* Free existing subdirectory entries */
-		dir_entry_t *current = dir->subdirs;
-		while (current) {
-			dir_entry_t *to_free = current;
-			current = current->next;
-			free(to_free);
+		/* Free old cache contents if they existed */
+		if (dir->validated) {
+			for (int i = 0; i < dir->subdir_count; i++) {
+				free(dir->keys[i]);
+			}
+			free(dir->keys);
+			hdestroy_r(&dir->subdirs_htab);
 		}
 
-		/* Update with new structure */
-		dir->subdirs = new_subdirs;
-		dir->subdir_count = new_subdir_count;
-		dir->mtime = get_mtime(path);
+		/* Initialize new cache contents */
+		dir->keys = NULL;
+		dir->subdir_count = 0;
+		dir->keys_capacity = 0;
+		memset(&dir->subdirs_htab, 0, sizeof(dir->subdirs_htab));
+		if (!hcreate_r(512, &dir->subdirs_htab)) {
+			log_message(LOG_ERR, "Failed to create replacement hash table for cache: %s", strerror(errno));
+			/* Must free temporary keys before returning */
+			for (int i = 0; i < current_key_count; i++) free(current_keys[i]);
+			hdestroy_r(&current_htab);
+			return false;
+		}
+
+		/* Populate the new cache with the data from the disk scan */
+		for (int i = 0; i < current_key_count; i++) {
+			ENTRY item = { current_keys[i], (void *) 1 };
+			ENTRY *result;
+			if (hsearch_r(item, ENTER, &result, &dir->subdirs_htab)) {
+				/* Key is now owned by the cache, add it to the tracking array */
+				add_key_to_dir(dir, current_keys[i]);
+			} else {
+				/* Failed to insert, so we must free this key */
+				free(current_keys[i]);
+			}
+		}
 		dir->validated = true;
 
-		*changed = true;
 	} else {
 		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
-
-		/* Free temporary structure */
-		while (new_subdirs) {
-			dir_entry_t *to_free = new_subdirs;
-			new_subdirs = new_subdirs->next;
-			free(to_free);
-		}
-
-		/* Update timestamp only */
-		dir->mtime = get_mtime(path);
-
 		*changed = false;
+		/* Free the temporary keys, as they are not being transferred to the cache */
+		for (int i = 0; i < current_key_count; i++) {
+			free(current_keys[i]);
+		}
 	}
 
-	/* Clean up hash tables */
-	if (htab_initialized) {
-		hdestroy_r(&new_paths_htab);
-		hdestroy_r(&old_paths_htab);
-	}
+	/* Final cleanup */
+	dir->mtime = get_mtime(path);
+	hdestroy_r(&current_htab);
 
 	return true;
 }
@@ -344,9 +297,12 @@ bool dircache_refresh(const char *path, bool *changed) {
 		/* Initialize new cache entry */
 		strncpy(dir->path, path, PATH_MAX_LEN - 1);
 		dir->path[PATH_MAX_LEN - 1] = '\0';
-		dir->subdirs = NULL;
+		dir->mtime = 0;
+		dir->keys = NULL;
 		dir->subdir_count = 0;
+		dir->keys_capacity = 0;
 		dir->validated = false;
+		memset(&dir->subdirs_htab, 0, sizeof(dir->subdirs_htab));
 
 		/* Add to hash table */
 		ENTRY item, *result;
@@ -376,7 +332,6 @@ bool dircache_refresh(const char *path, bool *changed) {
 
 		/* Check and update directory structure */
 		if (!dircache_sync(path, dir, changed)) {
-			/* Clean up on failure - note that we can't remove from hash table */
 			/* The entry will be cleaned up during dircache_cleanup */
 			return false;
 		}
@@ -391,7 +346,6 @@ bool dircache_refresh(const char *path, bool *changed) {
 char **dircache_subdirs(const char *path, int *count) {
 	cached_dir_t *dir;
 	char **subdirs;
-	int i = 0;
 
 	*count = 0;
 
@@ -415,9 +369,8 @@ char **dircache_subdirs(const char *path, int *count) {
 	}
 
 	/* Fill array with subdirectory paths */
-	dir_entry_t *entry = dir->subdirs;
-	while (entry && i < dir->subdir_count) {
-		subdirs[i] = strdup(entry->path);
+	for (int i = 0; i < dir->subdir_count; i++) {
+		subdirs[i] = strdup(dir->keys[i]);
 		if (!subdirs[i]) {
 			/* Clean up on failure */
 			for (int j = 0; j < i; j++) {
@@ -427,12 +380,9 @@ char **dircache_subdirs(const char *path, int *count) {
 			log_message(LOG_ERR, "Failed to allocate memory for subdirectory path");
 			return NULL;
 		}
-
-		i++;
-		entry = entry->next;
 	}
 
-	*count = i;
+	*count = dir->subdir_count;
 	return subdirs;
 }
 

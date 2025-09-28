@@ -1,6 +1,7 @@
 #ifndef DIRCACHE_H
 #define DIRCACHE_H
 
+#include <search.h>
 #include <stdbool.h>
 #include <time.h>
 
@@ -8,18 +9,14 @@
 #define HASH_TABLE_SIZE 4096               /* Number of hash table buckets for directory cache */
 #define PATH_MAX_LEN 1024                  /* Maximum length for filesystem paths */
 
-/* Structure to represent a subdirectory entry in linked list */
-typedef struct dir_entry {
-	char path[PATH_MAX_LEN];               /* Full path to the subdirectory */
-	struct dir_entry *next;                /* Pointer to next entry in linked list */
-} dir_entry_t;
-
 /* Structure to represent a cached directory with metadata */
 typedef struct cached_dir {
 	char path[PATH_MAX_LEN];               /* Full path to the cached directory */
 	time_t mtime;                          /* Last modification time from stat() */
-	dir_entry_t *subdirs;                  /* Linked list of subdirectories */
+	struct hsearch_data subdirs_htab;      /* Hash table of subdirectories for fast lookups */
+	char **keys;                           /* Dynamically allocated array of keys for cleanup */
 	int subdir_count;                      /* Total number of subdirectories found */
+	int keys_capacity;                     /* Capacity of the keys array */
 	bool validated;                        /* Whether the cache entry is up-to-date */
 } cached_dir_t;
 
