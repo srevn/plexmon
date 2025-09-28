@@ -35,34 +35,55 @@ bool config_load(const char *config_path) {
 		if (len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
 
 		/* Parse key=value format */
-		if (sscanf(line, "%255[^=]=%767s", key, value) == 2) {
-			/* Trim whitespace from key */
+		char *separator = strchr(line, '=');
+		if (separator) {
+			/* Extract key */
+			*separator = '\0';
+			strncpy(key, line, sizeof(key) - 1);
+			key[sizeof(key) - 1] = '\0';
+
+			/* Extract value */
+			char *value_ptr = separator + 1;
+			strncpy(value, value_ptr, sizeof(value) - 1);
+			value[sizeof(value) - 1] = '\0';
+
+			/* Trim leading whitespace from key */
 			char *k = key;
-			while (isspace(*k)) k++;
+			while (isspace((unsigned char) *k)) k++;
+
+			/* Trim trailing whitespace from key */
 			char *end = k + strlen(k) - 1;
-			while (end > k && isspace(*end)) *end-- = '\0';
+			while (end > k && isspace((unsigned char) *end)) *end-- = '\0';
+
+			/* Trim leading whitespace from value */
+			char *v = value;
+			while (isspace((unsigned char) *v)) v++;
+
+			/* Trim trailing whitespace from value */
+			end = v + strlen(v) - 1;
+			while (end > v && isspace((unsigned char) *end)) *end-- = '\0';
 
 			/* Process configuration options */
 			if (strcmp(k, "plex_url") == 0) {
-				strncpy(g_config.plex_url, value, PATH_MAX_LEN - 1);
+				strncpy(g_config.plex_url, v, PATH_MAX_LEN - 1);
 				g_config.plex_url[PATH_MAX_LEN - 1] = '\0';
 			} else if (strcmp(k, "plex_token") == 0) {
-				strncpy(g_config.plex_token, value, TOKEN_MAX_LEN - 1);
+				strncpy(g_config.plex_token, v, TOKEN_MAX_LEN - 1);
 				g_config.plex_token[TOKEN_MAX_LEN - 1] = '\0';
 			} else if (strcmp(k, "scan_interval") == 0) {
-				g_config.scan_interval = atoi(value);
+				g_config.scan_interval = atoi(v);
 			} else if (strcmp(k, "startup_timeout") == 0) {
-				g_config.startup_timeout = atoi(value);
+				g_config.startup_timeout = atoi(v);
 			} else if (strcmp(k, "log_level") == 0) {
-				if (strcasecmp(value, "debug") == 0) {
+				if (strcasecmp(v, "debug") == 0) {
 					g_config.log_level = LOG_DEBUG;
-				} else if (strcasecmp(value, "info") == 0) {
+				} else if (strcasecmp(v, "info") == 0) {
 					g_config.log_level = LOG_INFO;
 				} else {
-					log_message(LOG_WARNING, "Invalid log_level (%s), using default", value);
+					log_message(LOG_WARNING, "Invalid log_level (%s), using default", v);
 				}
 			} else if (strcmp(k, "log_file") == 0) {
-				strncpy(g_config.log_file, value, PATH_MAX_LEN - 1);
+				strncpy(g_config.log_file, v, PATH_MAX_LEN - 1);
 				g_config.log_file[PATH_MAX_LEN - 1] = '\0';
 			} else {
 				log_message(LOG_WARNING, "Unknown configuration option: %s", k);
