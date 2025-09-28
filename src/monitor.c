@@ -563,19 +563,20 @@ bool monitor_tree(const char *dir_path, int section_id) {
 			break;
 		}
 
-		/* Add current directory to monitoring */
-		if (monitor_add(current_path, section_id) < 0) {
-			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-			continue;
-		}
-
-		/* Refresh directory cache and get subdirectories */
+		/* Refresh directory cache first to populate it */
 		bool dir_changed;
 		if (!dircache_refresh(current_path, &dir_changed)) {
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
 			continue;
 		}
 
+		/* Add current directory to monitoring */
+		if (monitor_add(current_path, section_id) < 0) {
+			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+			continue;
+		}
+
+		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
