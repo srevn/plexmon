@@ -124,25 +124,34 @@ int monitor_count(void) {
 	return num_monitored_dirs;
 }
 
-/* Helper function to check if directory is already being monitored */
-bool is_directory_monitored(const char *path) {
+/* Helper function to find a monitored directory by its path */
+static int find_monitored_dir_by_path(const char *path) {
 	for (int i = 0; i < num_monitored_dirs; i++) {
 		if (strcmp(monitored_dirs[i].path, path) == 0) {
-
-			/* Verify the directory still exists and is the same */
-			struct stat path_stat;
-			if (monitored_dirs[i].fd >= 0 &&
-				stat(path, &path_stat) == 0 &&
-				path_stat.st_dev == monitored_dirs[i].device &&
-				path_stat.st_ino == monitored_dirs[i].inode) {
-				return true;
-			} else {
-				/* Directory was deleted/recreated or fd is invalid, remove from monitoring */
-				monitor_remove(i);
-				return false;
-			}
+			return i;
 		}
 	}
+	return -1;
+}
+
+/* Helper function to check if directory is already being monitored */
+bool is_directory_monitored(const char *path) {
+	int index = find_monitored_dir_by_path(path);
+	if (index == -1) {
+		return false;
+	}
+
+	monitored_dir_t *dir = &monitored_dirs[index];
+
+	/* Verify the directory still exists and is the same */
+	struct stat path_stat;
+	if (dir->fd >= 0 && stat(path, &path_stat) == 0 &&
+		path_stat.st_dev == dir->device && path_stat.st_ino == dir->inode) {
+		return true;
+	}
+
+	/* Directory was deleted/recreated or fd is invalid, remove from monitoring */
+	monitor_remove(index);
 	return false;
 }
 
@@ -195,10 +204,20 @@ int monitor_add(const char *path, int plex_section_id) {
 	}
 
 	/* Check if the directory is already being monitored */
-	for (int i = 0; i < num_monitored_dirs; i++) {
-		if (strcmp(monitored_dirs[i].path, path) == 0) {
+	int index = find_monitored_dir_by_path(path);
+	if (index != -1) {
+		/* It's in our list. Verify if it's still the same directory. */
+		struct stat path_stat;
+		monitored_dir_t *dir = &monitored_dirs[index];
+
+		if (dir->fd >= 0 && stat(path, &path_stat) == 0 &&
+			path_stat.st_dev == dir->device && path_stat.st_ino == dir->inode) {
 			log_message(LOG_DEBUG, "Directory %s is already being monitored", path);
-			return i;
+			return index;
+		} else {
+			/* Stale entry. Remove it before adding the new one. */
+			log_message(LOG_DEBUG, "Removing stale monitor for path %s before re-adding", path);
+			monitor_remove(index);
 		}
 	}
 
@@ -236,9 +255,7 @@ int monitor_add(const char *path, int plex_section_id) {
 
 /* Handle directory events */
 static void monitor_event(monitored_dir_t *md, int fflags) {
-	if (!(fflags & NOTE_WRITE)) return;
-
-	log_message(LOG_INFO, "Change detected in directory: %s", md->path);
+	log_message(LOG_INFO, "Change detected in directory: %s (flags: 0x%x)", md->path, fflags);
 
 	/* Check for new subdirectories that need to be monitored */
 	if (!is_directory(md->path)) {
