@@ -36,7 +36,7 @@ bool dircache_init(void) {
 }
 
 /* Add entry to the tracker */
-static bool track_cache_entry(char *key, cached_dir_t *dir) {
+static bool dircache_track(char *key, cached_dir_t *dir) {
 	cache_tracker_t *tracker = malloc(sizeof(cache_tracker_t));
 	if (!tracker) {
 		return false;
@@ -86,7 +86,7 @@ void dircache_cleanup(void) {
 }
 
 /* Get file modification time */
-static time_t get_mtime(const char *path) {
+static time_t dircache_mtime(const char *path) {
 	struct stat st;
 
 	if (stat(path, &st) != 0) {
@@ -97,7 +97,7 @@ static time_t get_mtime(const char *path) {
 }
 
 /* Find a directory in the cache */
-static cached_dir_t *find_dir(const char *path) {
+static cached_dir_t *dircache_find(const char *path) {
 	ENTRY item, *result;
 
 	/* Set up the search key */
@@ -111,23 +111,6 @@ static cached_dir_t *find_dir(const char *path) {
 	return NULL;
 }
 
-/* Helper function to manage the dynamic keys array for a cached directory */
-static bool add_key_to_dir(cached_dir_t *dir, char *key) {
-	if (dir->subdir_count >= dir->keys_capacity) {
-		int new_capacity = (dir->keys_capacity == 0) ? 16 : dir->keys_capacity * 2;
-		char **new_keys = realloc(dir->keys, new_capacity * sizeof(char *));
-		if (!new_keys) {
-			log_message(LOG_ERR, "Failed to reallocate keys array for dircache");
-			free(key); /* Avoid leaking the key we failed to add */
-			return false;
-		}
-		dir->keys = new_keys;
-		dir->keys_capacity = new_capacity;
-	}
-	dir->keys[dir->subdir_count++] = key;
-	return true;
-}
-
 /* Check if directory structure has changed and updates cache */
 static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	DIR *dirp;
@@ -135,26 +118,25 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	char full_path[PATH_MAX_LEN];
 	*changed = false;
 
-	/* Temporary hash table for the current state on disk */
-	struct hsearch_data current_htab;
-	memset(&current_htab, 0, sizeof(current_htab));
-	if (!hcreate_r(512, &current_htab)) {
+	/* Structures to hold the new state read from disk */
+	struct hsearch_data new_htab;
+	memset(&new_htab, 0, sizeof(new_htab));
+	if (!hcreate_r(512, &new_htab)) {
 		log_message(LOG_ERR, "Failed to create temporary hash table for sync: %s", strerror(errno));
 		return false;
 	}
 
-	char **current_keys = NULL;
-	int current_key_count = 0;
-	int current_keys_capacity = 0;
-	bool structure_changed = false;
+	char **new_keys = NULL;
+	int new_key_count = 0;
+	int new_keys_capacity = 0;
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
-		hdestroy_r(&current_htab);
+		hdestroy_r(&new_htab);
 		return false;
 	}
 
-	/* Scan disk and populate the temporary hash table */
+	/* Scan disk and populate the new state structures */
 	while ((entry = readdir(dirp))) {
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
@@ -165,48 +147,45 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			char *key = strdup(full_path);
 			if (!key) continue;
 
-			if (current_key_count >= current_keys_capacity) {
-				int new_capacity = (current_keys_capacity == 0) ? 128 : current_keys_capacity * 2;
-				char **new_keys_arr = realloc(current_keys, new_capacity * sizeof(char *));
+			/* Add key to the dynamic array */
+			if (new_key_count >= new_keys_capacity) {
+				int new_capacity = (new_keys_capacity == 0) ? 128 : new_keys_capacity * 2;
+				char **new_keys_arr = realloc(new_keys, new_capacity * sizeof(char *));
 				if (!new_keys_arr) {
 					log_message(LOG_WARNING, "Failed to allocate memory for temp key tracking");
 					free(key);
 					continue;
 				}
-				current_keys = new_keys_arr;
-				current_keys_capacity = new_capacity;
+				new_keys = new_keys_arr;
+				new_keys_capacity = new_capacity;
 			}
-			current_keys[current_key_count++] = key;
+			new_keys[new_key_count++] = key;
 
+			/* Add key to the hash table */
 			ENTRY item = { key, (void *) 1 };
 			ENTRY *result;
-			hsearch_r(item, ENTER, &result, &current_htab);
+			hsearch_r(item, ENTER, &result, &new_htab);
 		}
 	}
 	closedir(dirp);
 
-	/* Check for changes between cache and disk */
-	if (dir->validated) {
-		/* Check for count mismatch first for a quick exit */
-		if (dir->subdir_count != current_key_count) {
-			structure_changed = true;
-		} else {
-			/* If counts match, check for any new directories */
-			for (int i = 0; i < current_key_count; i++) {
-				ENTRY search_item = { current_keys[i], NULL };
-				ENTRY *result = NULL;
-				if (!hsearch_r(search_item, FIND, &result, &dir->subdirs_htab)) {
-					structure_changed = true;
-					break;
-				}
+	/* Check for changes between the old cache and the new state from disk */
+	bool structure_changed = false;
+	if (!dir->validated || dir->subdir_count != new_key_count) {
+		structure_changed = true;
+	} else {
+		/* If counts match, check if all new keys exist in the old cache */
+		for (int i = 0; i < new_key_count; i++) {
+			ENTRY search_item = { new_keys[i], NULL };
+			ENTRY *result = NULL;
+			if (!hsearch_r(search_item, FIND, &result, &dir->subdirs_htab)) {
+				structure_changed = true;
+				break;
 			}
 		}
-	} else {
-		/* Not validated, so always update */
-		structure_changed = true;
 	}
 
-	/* If changed, rebuild the cache entry from the disk scan */
+	/* If changed, replace the old cache with the new state */
 	if (structure_changed) {
 		log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
 		*changed = true;
@@ -220,48 +199,26 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			hdestroy_r(&dir->subdirs_htab);
 		}
 
-		/* Initialize new cache contents */
-		dir->keys = NULL;
-		dir->subdir_count = 0;
-		dir->keys_capacity = 0;
-		memset(&dir->subdirs_htab, 0, sizeof(dir->subdirs_htab));
-		if (!hcreate_r(512, &dir->subdirs_htab)) {
-			log_message(LOG_ERR, "Failed to create replacement hash table for cache: %s", strerror(errno));
-			/* Must free temporary keys before returning */
-			for (int i = 0; i < current_key_count; i++) free(current_keys[i]);
-			free(current_keys);
-			hdestroy_r(&current_htab);
-			return false;
-		}
-
-		/* Populate the new cache with the data from the disk scan */
-		for (int i = 0; i < current_key_count; i++) {
-			ENTRY item = { current_keys[i], (void *) 1 };
-			ENTRY *result;
-			if (hsearch_r(item, ENTER, &result, &dir->subdirs_htab)) {
-				/* Key is now owned by the cache, add it to the tracking array */
-				add_key_to_dir(dir, current_keys[i]);
-			} else {
-				/* Failed to insert, so we must free this key */
-				free(current_keys[i]);
-			}
-		}
+		/* Promote the new state to be the current cache state */
+		dir->keys = new_keys;
+		dir->subdir_count = new_key_count;
+		dir->keys_capacity = new_keys_capacity;
+		dir->subdirs_htab = new_htab; /* Struct copy */
 		dir->validated = true;
 
 	} else {
 		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
 		*changed = false;
-		/* Free the temporary keys, as they are not being transferred to the cache */
-		for (int i = 0; i < current_key_count; i++) {
-			free(current_keys[i]);
+
+		/* Discard the new state structures as they are not needed */
+		for (int i = 0; i < new_key_count; i++) {
+			free(new_keys[i]);
 		}
+		free(new_keys);
+		hdestroy_r(&new_htab);
 	}
 
-	/* Final cleanup */
-	free(current_keys);
-	dir->mtime = get_mtime(path);
-	hdestroy_r(&current_htab);
-
+	dir->mtime = dircache_mtime(path);
 	return true;
 }
 
@@ -273,14 +230,14 @@ bool dircache_refresh(const char *path, bool *changed) {
 	*changed = false;
 
 	/* Get current mtime */
-	current_mtime = get_mtime(path);
+	current_mtime = dircache_mtime(path);
 	if (current_mtime == 0) {
 		log_message(LOG_WARNING, "Failed to get mtime for %s", path);
 		return false;
 	}
 
 	/* Check if directory is in cache */
-	dir = find_dir(path);
+	dir = dircache_find(path);
 
 	if (dir) {
 		/* Directory is in cache, check if it has changed */
@@ -330,7 +287,7 @@ bool dircache_refresh(const char *path, bool *changed) {
 		}
 
 		/* Track this entry for proper cleanup */
-		if (!track_cache_entry(key_copy, dir)) {
+		if (!dircache_track(key_copy, dir)) {
 			log_message(LOG_ERR, "Failed to track cache entry");
 			/* Can't remove from hash table, but continue anyway */
 		}
@@ -357,7 +314,7 @@ char **dircache_subdirs(const char *path, int *count) {
 	*count = 0;
 
 	/* Find directory in cache */
-	dir = find_dir(path);
+	dir = dircache_find(path);
 	if (!dir || !dir->validated) {
 		/* If not in cache or not valid, return NULL */
 		return NULL;
