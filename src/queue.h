@@ -24,6 +24,6 @@ void queue_free(queue_t *queue);
 /* Queue operations */
 bool queue_enqueue(queue_t *queue, const char *path);
 bool queue_dequeue(queue_t *queue, char *path, size_t path_len);
-bool queue_is_empty(queue_t *queue);
+bool queue_empty(queue_t *queue);
 
 #endif /* QUEUE_H */

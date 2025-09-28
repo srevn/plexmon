@@ -73,6 +73,6 @@ void queue_free(queue_t *queue) {
 }
 
 /* Check if queue is empty */
-bool queue_is_empty(queue_t *queue) {
+bool queue_empty(queue_t *queue) {
 	return queue->front == NULL;
 }

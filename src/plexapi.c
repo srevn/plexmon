@@ -42,7 +42,8 @@ static struct curl_slist *curl_headers(void) {
 	/* Add auth token if available */
 	if (strlen(g_config.plex_token) > 0) {
 		char auth_header[TOKEN_MAX_LEN + 20];
-		snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+		snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s",
+				 g_config.plex_token);
 		headers = curl_slist_append(headers, auth_header);
 	}
 
@@ -135,10 +136,12 @@ bool plexapi_check(void) {
 				curl_slist_free_all(headers);
 				return true;
 			} else {
-				log_message(LOG_DEBUG, "Plex server responded with HTTP %ld", http_code);
+				log_message(LOG_DEBUG, "Plex server responded with HTTP %ld",
+							http_code);
 			}
 		} else {
-			log_message(LOG_DEBUG, "Failed to connect to Plex: %s", curl_easy_strerror(res));
+			log_message(LOG_DEBUG, "Failed to connect to Plex: %s",
+						curl_easy_strerror(res));
 		}
 
 		/* Clean up response */
@@ -180,7 +183,8 @@ static bool plexapi_process(json_object *section) {
 
 	/* Get locations for this section */
 	if (!json_object_object_get_ex(section, "Location", &location_array)) {
-		log_message(LOG_WARNING, "Library section %d has no locations", section_id);
+		log_message(LOG_WARNING, "Library section %d has no locations",
+					section_id);
 		return false;
 	}
 
@@ -191,19 +195,22 @@ static bool plexapi_process(json_object *section) {
 		location = json_object_array_get_idx(location_array, j);
 
 		if (!json_object_object_get_ex(location, "path", &path_obj)) {
-			log_message(LOG_WARNING, "Location %d in section %d missing path", j, section_id);
+			log_message(LOG_WARNING, "Location %d in section %d missing path",
+						j, section_id);
 			continue;
 		}
 
 		section_path = json_object_get_string(path_obj);
 
 		/* Add this directory to the watch list */
-		log_message(LOG_INFO, "Monitoring library: %s (section %d)", section_path, section_id);
+		log_message(LOG_INFO, "Monitoring library: %s (section %d)",
+					section_path, section_id);
 
 		if (monitor_tree(section_path, section_id)) {
 			success = true;
 		} else {
-			log_message(LOG_WARNING, "Failed to add directory %s to watch list", section_path);
+			log_message(LOG_WARNING, "Failed to add directory %s to watch list",
+						section_path);
 		}
 	}
 
@@ -254,7 +261,8 @@ bool plexapi_libraries(void) {
 	curl_slist_free_all(headers);
 
 	if (res != CURLE_OK) {
-		log_message(LOG_ERR, "Failed to get library sections: %s", curl_easy_strerror(res));
+		log_message(LOG_ERR, "Failed to get library sections: %s",
+					curl_easy_strerror(res));
 		free(response.data);
 		return false;
 	}
@@ -301,7 +309,8 @@ bool plexapi_scan(const char *path, int section_id) {
 	struct curl_slist *headers = NULL;
 	CURLcode res;
 
-	log_message(LOG_DEBUG, "Triggering Plex scan for path: %s (section %d)", path, section_id);
+	log_message(LOG_DEBUG, "Triggering Plex scan for path: %s (section %d)",
+				path, section_id);
 
 	if (!curl_handle) {
 		log_message(LOG_ERR, "CURL not initialized");
@@ -339,7 +348,8 @@ bool plexapi_scan(const char *path, int section_id) {
 	curl_slist_free_all(headers);
 
 	if (res != CURLE_OK) {
-		log_message(LOG_ERR, "Failed to trigger Plex scan: %s", curl_easy_strerror(res));
+		log_message(LOG_ERR, "Failed to trigger Plex scan: %s",
+					curl_easy_strerror(res));
 		free(response.data);
 		return false;
 	}

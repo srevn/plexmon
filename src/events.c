@@ -10,10 +10,9 @@
 #include "logger.h"
 #include "plexapi.h"
 
-/* Array of pending scans */
-static pending_t *pending = NULL;
-static int num_pending = 0;
-static int pending_capacity = 0;
+static pending_t *pending = NULL;     /* Array of pending scans */
+static int num_pending = 0;           /* Current number of pending scans */
+static int pending_capacity = 0;      /* Allocated capacity of pending array */
 
 /* Initialize event processor */
 bool events_init(void) {

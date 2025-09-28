@@ -12,14 +12,14 @@
 #include "logger.h"
 #include "utilities.h"
 
-KHASH_MAP_INIT_STR(dir_cache, cached_dir_t *)   /* Main hash map from string to cached_dir_t* */
-static khash_t(dir_cache) * dir_cache_htab;     /* Hash table for directory cache */
+KHASH_MAP_INIT_STR(dir_cache, cached_dir_t *)        /* Main hash map from string to cached_dir_t* */
+static khash_t(dir_cache) * cache_hash;		         /* Hash table for directory cache */
 
 /* Initialize the directory cache */
 bool dircache_init(void) {
 	log_message(LOG_INFO, "Initializing directory cache with hash table");
-	dir_cache_htab = kh_init(dir_cache);
-	if (!dir_cache_htab) {
+	cache_hash = kh_init(dir_cache);
+	if (!cache_hash) {
 		log_message(LOG_ERR, "Failed to create directory cache hash table");
 		return false;
 	}
@@ -28,17 +28,17 @@ bool dircache_init(void) {
 
 /* Clean up the directory cache */
 void dircache_cleanup(void) {
-	if (!dir_cache_htab) {
+	if (!cache_hash) {
 		return;
 	}
 
 	log_message(LOG_INFO, "Cleaning up directory cache");
 
 	khint_t k;
-	for (k = kh_begin(dir_cache_htab); k != kh_end(dir_cache_htab); ++k) {
-		if (kh_exist(dir_cache_htab, k)) {
-			const char *path_key = kh_key(dir_cache_htab, k);
-			cached_dir_t *dir = kh_value(dir_cache_htab, k);
+	for (k = kh_begin(cache_hash); k != kh_end(cache_hash); ++k) {
+		if (kh_exist(cache_hash, k)) {
+			const char *path_key = kh_key(cache_hash, k);
+			cached_dir_t *dir = kh_value(cache_hash, k);
 
 			if (dir && dir->subdirs) {
 				khint_t sub_k;
@@ -54,8 +54,8 @@ void dircache_cleanup(void) {
 		}
 	}
 
-	kh_destroy(dir_cache, dir_cache_htab);
-	dir_cache_htab = NULL;
+	kh_destroy(dir_cache, cache_hash);
+	cache_hash = NULL;
 }
 
 /* Get file modification time */
@@ -69,12 +69,12 @@ static time_t dircache_mtime(const char *path) {
 
 /* Find a directory in the cache */
 static cached_dir_t *dircache_find(const char *path) {
-	if (!dir_cache_htab) return NULL;
-	khint_t k = kh_get(dir_cache, dir_cache_htab, path);
-	if (k == kh_end(dir_cache_htab)) {
+	if (!cache_hash) return NULL;
+	khint_t k = kh_get(dir_cache, cache_hash, path);
+	if (k == kh_end(cache_hash)) {
 		return NULL;
 	}
-	return kh_value(dir_cache_htab, k);
+	return kh_value(cache_hash, k);
 }
 
 /* Check if directory structure has changed and updates cache */
@@ -227,14 +227,14 @@ bool dircache_refresh(const char *path, bool *changed) {
 		}
 
 		int ret;
-		khint_t k = kh_put(dir_cache, dir_cache_htab, key_copy, &ret);
+		khint_t k = kh_put(dir_cache, cache_hash, key_copy, &ret);
 		if (ret == -1) {
 			log_message(LOG_ERR, "Failed to add directory to hash table");
 			free(key_copy);
 			free(dir);
 			return false;
 		}
-		kh_value(dir_cache_htab, k) = dir;
+		kh_value(cache_hash, k) = dir;
 
 		/* Check and update directory structure */
 		if (!dircache_sync(path, dir, changed)) {

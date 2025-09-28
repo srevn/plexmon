@@ -27,6 +27,5 @@ extern config_t g_config;
 
 /* Configuration management */
 bool config_load(const char *config_path);
-void config_free(void);
 
 #endif /* CONFIG_H */

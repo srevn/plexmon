@@ -18,44 +18,41 @@
 #include "queue.h"
 #include "utilities.h"
 
-KHASH_MAP_INIT_STR(mon_dir, int)               /* Hash map from string to monitored_dir_t index */
-
-/* Global variables */
-uintptr_t g_user_event_ident = 0;              /* Global user event identifier */
+KHASH_MAP_INIT_STR(mon_dir, int) /* Hash map from string to monitored_dir_t index */
 
 /* Static variables for monitor implementation */
-#define INITIAL_MONITOR_CAPACITY 256
 static monitored_dir_t *monitored_dirs = NULL; /* Dynamic array of monitored directories */
-static int monitored_dirs_capacity = 0;		   /* Current capacity of the array */
-static int active_dir_count = 0;			   /* Number of active directories */
-static int free_list_head = -1;				   /* Head of the free list for empty slots */
-static khash_t(mon_dir) * monitored_dirs_htab; /* Hash table for fast path lookups */
-static int g_kqueue_fd = -1;				   /* Global kqueue descriptor */
+static int dirs_capacity = 0;				   /* Current capacity of the array */
+static int active_count = 0;				   /* Number of active directories */
+static int free_head = -1;					   /* Head of the free list for empty slots */
+static khash_t(mon_dir) * dirs_hash;		   /* Hash table for fast path lookups */
+static int kqueue_fd = -1;					   /* Global kqueue descriptor */
+uintptr_t g_user_event_ident = 0;			   /* Global user event identifier */
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {
 	log_message(LOG_INFO, "Initializing file system monitoring");
 
 	/* Allocate and initialize the dynamic array for monitored directories */
-	monitored_dirs_capacity = INITIAL_MONITOR_CAPACITY;
-	monitored_dirs = malloc(monitored_dirs_capacity * sizeof(monitored_dir_t));
+	dirs_capacity = INITIAL_MONITOR_CAPACITY;
+	monitored_dirs = malloc(dirs_capacity * sizeof(monitored_dir_t));
 	if (!monitored_dirs) {
 		log_message(LOG_ERR, "Failed to allocate memory for monitored directories");
 		return false;
 	}
 
 	/* Build the free list */
-	for (int i = 0; i < monitored_dirs_capacity; i++) {
+	for (int i = 0; i < dirs_capacity; i++) {
 		monitored_dirs[i].fd = -1;
 		monitored_dirs[i].next_free = (i + 1);
 	}
-	monitored_dirs[monitored_dirs_capacity - 1].next_free = -1; /* End of list */
-	free_list_head = 0;
-	active_dir_count = 0;
+	monitored_dirs[dirs_capacity - 1].next_free = -1; /* End of list */
+	free_head = 0;
+	active_count = 0;
 
 	/* Create kqueue */
-	g_kqueue_fd = kqueue();
-	if (g_kqueue_fd == -1) {
+	kqueue_fd = kqueue();
+	if (kqueue_fd == -1) {
 		log_message(LOG_ERR, "Failed to create kqueue: %s", strerror(errno));
 		free(monitored_dirs);
 		monitored_dirs = NULL;
@@ -63,11 +60,11 @@ bool monitor_init(void) {
 	}
 
 	/* Initialize hash table for path lookups */
-	monitored_dirs_htab = kh_init(mon_dir);
-	if (!monitored_dirs_htab) {
+	dirs_hash = kh_init(mon_dir);
+	if (!dirs_hash) {
 		log_message(LOG_ERR, "Failed to create monitored dirs hash table");
-		close(g_kqueue_fd);
-		g_kqueue_fd = -1;
+		close(kqueue_fd);
+		kqueue_fd = -1;
 		free(monitored_dirs);
 		monitored_dirs = NULL;
 		return false;
@@ -78,18 +75,18 @@ bool monitor_init(void) {
 	g_user_event_ident = getpid(); /* Use PID as the identifier */
 
 	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
-	if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to register user event: %s", strerror(errno));
-		close(g_kqueue_fd);
-		g_kqueue_fd = -1;
-		kh_destroy(mon_dir, monitored_dirs_htab);
-		monitored_dirs_htab = NULL;
+		close(kqueue_fd);
+		kqueue_fd = -1;
+		kh_destroy(mon_dir, dirs_hash);
+		dirs_hash = NULL;
 		free(monitored_dirs);
 		monitored_dirs = NULL;
 		return false;
 	}
 
-	log_message(LOG_INFO, "Kqueue created successfully with descriptor %d", g_kqueue_fd);
+	log_message(LOG_INFO, "Kqueue created successfully with descriptor %d", kqueue_fd);
 	return true;
 }
 
@@ -99,7 +96,7 @@ void monitor_cleanup(void) {
 
 	if (monitored_dirs) {
 		/* Close all file descriptors */
-		for (int i = 0; i < monitored_dirs_capacity; i++) {
+		for (int i = 0; i < dirs_capacity; i++) {
 			if (monitored_dirs[i].fd >= 0) {
 				close(monitored_dirs[i].fd);
 				monitored_dirs[i].fd = -1;
@@ -108,21 +105,21 @@ void monitor_cleanup(void) {
 	}
 
 	/* Close kqueue */
-	if (g_kqueue_fd != -1) {
-		close(g_kqueue_fd);
-		g_kqueue_fd = -1;
+	if (kqueue_fd != -1) {
+		close(kqueue_fd);
+		kqueue_fd = -1;
 	}
 
 	/* Destroy the hash table */
-	if (monitored_dirs_htab) {
+	if (dirs_hash) {
 		khint_t k;
-		for (k = kh_begin(monitored_dirs_htab); k != kh_end(monitored_dirs_htab); ++k) {
-			if (kh_exist(monitored_dirs_htab, k)) {
-				free((void *) kh_key(monitored_dirs_htab, k));
+		for (k = kh_begin(dirs_hash); k != kh_end(dirs_hash); ++k) {
+			if (kh_exist(dirs_hash, k)) {
+				free((void *) kh_key(dirs_hash, k));
 			}
 		}
-		kh_destroy(mon_dir, monitored_dirs_htab);
-		monitored_dirs_htab = NULL;
+		kh_destroy(mon_dir, dirs_hash);
+		dirs_hash = NULL;
 	}
 
 	/* Free the dynamic array */
@@ -131,23 +128,23 @@ void monitor_cleanup(void) {
 		monitored_dirs = NULL;
 	}
 
-	monitored_dirs_capacity = 0;
-	active_dir_count = 0;
-	free_list_head = -1;
+	dirs_capacity = 0;
+	active_count = 0;
+	free_head = -1;
 }
 
 /* Signal to the event loop to exit */
 void monitor_exit(void) {
 	struct kevent kev;
 
-	if (g_kqueue_fd == -1) return;
+	if (kqueue_fd == -1) return;
 
 	log_message(LOG_INFO, "Sending exit signal to event loop");
 
 	/* Set up and trigger the user event for exit */
 	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_EXIT, NULL);
 
-	if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to signal exit event: %s", strerror(errno));
 	}
 }
@@ -156,39 +153,39 @@ void monitor_exit(void) {
 void monitor_reload(void) {
 	struct kevent kev;
 
-	if (g_kqueue_fd == -1) return;
+	if (kqueue_fd == -1) return;
 
 	log_message(LOG_INFO, "Sending reload signal to event loop");
 
 	/* Set up and trigger the user event for reload */
 	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_RELOAD, NULL);
 
-	if (kevent(g_kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
+	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to signal reload event: %s", strerror(errno));
 	}
 }
 
 /* Get the kqueue file descriptor */
 int monitor_get_kqueue_fd(void) {
-	return g_kqueue_fd;
+	return kqueue_fd;
 }
 
 /* Return the current count of monitored directories */
 int monitor_count(void) {
-	return active_dir_count;
+	return active_count;
 }
 
 /* Helper function to find a monitored directory by its path */
 static int find_monitored_dir_by_path(const char *path) {
-	if (!monitored_dirs_htab) {
+	if (!dirs_hash) {
 		return -1;
 	}
 
-	khint_t k = kh_get(mon_dir, monitored_dirs_htab, path);
-	if (k != kh_end(monitored_dirs_htab)) {
-		int index = kh_value(monitored_dirs_htab, k);
+	khint_t k = kh_get(mon_dir, dirs_hash, path);
+	if (k != kh_end(dirs_hash)) {
+		int index = kh_value(dirs_hash, k);
 		/* Check if the found dir is active */
-		if (index >= 0 && index < monitored_dirs_capacity && monitored_dirs[index].fd != -1) {
+		if (index >= 0 && index < dirs_capacity && monitored_dirs[index].fd != -1) {
 			return index;
 		}
 	}
@@ -198,7 +195,7 @@ static int find_monitored_dir_by_path(const char *path) {
 
 /* Remove a directory from the monitoring list by marking it as inactive */
 void monitor_remove(int index) {
-	if (index < 0 || index >= monitored_dirs_capacity) {
+	if (index < 0 || index >= dirs_capacity) {
 		return;
 	}
 
@@ -211,18 +208,18 @@ void monitor_remove(int index) {
 		dir->fd = -1; /* Mark as inactive */
 
 		/* Remove from hash table */
-		if (monitored_dirs_htab) {
-			khint_t k = kh_get(mon_dir, monitored_dirs_htab, dir->path);
-			if (k != kh_end(monitored_dirs_htab)) {
-				free((void *) kh_key(monitored_dirs_htab, k));
-				kh_del(mon_dir, monitored_dirs_htab, k);
+		if (dirs_hash) {
+			khint_t k = kh_get(mon_dir, dirs_hash, dir->path);
+			if (k != kh_end(dirs_hash)) {
+				free((void *) kh_key(dirs_hash, k));
+				kh_del(mon_dir, dirs_hash, k);
 			}
 		}
 
 		/* Add to free list */
-		dir->next_free = free_list_head;
-		free_list_head = index;
-		active_dir_count--;
+		dir->next_free = free_head;
+		free_head = index;
+		active_count--;
 	}
 }
 
@@ -257,7 +254,7 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 		   NOTE_WRITE | NOTE_RENAME | NOTE_DELETE | NOTE_EXTEND, 0, (void *) (intptr_t) index);
 
 	/* Register event with kqueue */
-	if (kevent(g_kqueue_fd, &change, 1, NULL, 0, NULL) == -1) {
+	if (kevent(kqueue_fd, &change, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Error registering directory %s with kqueue: %s",
 					dir_info->path, strerror(errno));
 		return false;
@@ -274,8 +271,8 @@ int monitor_add(const char *path, int section_id) {
 	}
 
 	/* If no free slots, resize the array */
-	if (free_list_head == -1) {
-		int old_capacity = monitored_dirs_capacity;
+	if (free_head == -1) {
+		int old_capacity = dirs_capacity;
 		int new_capacity = (old_capacity > 0) ? (old_capacity * 2) : INITIAL_MONITOR_CAPACITY;
 		monitored_dir_t *new_dirs = realloc(monitored_dirs, new_capacity * sizeof(monitored_dir_t));
 
@@ -284,7 +281,7 @@ int monitor_add(const char *path, int section_id) {
 			return -1;
 		}
 		monitored_dirs = new_dirs;
-		monitored_dirs_capacity = new_capacity;
+		dirs_capacity = new_capacity;
 
 		/* Rebuild the free list for the new portion */
 		for (int i = old_capacity; i < new_capacity; i++) {
@@ -292,21 +289,21 @@ int monitor_add(const char *path, int section_id) {
 			monitored_dirs[i].next_free = (i + 1);
 		}
 		monitored_dirs[new_capacity - 1].next_free = -1;
-		free_list_head = old_capacity;
+		free_head = old_capacity;
 		log_message(LOG_DEBUG, "Resized monitored directories to %d", new_capacity);
 	}
 
 	/* Get a free slot from the head of the list */
-	int new_index = free_list_head;
+	int new_index = free_head;
 	monitored_dir_t *new_dir = &monitored_dirs[new_index];
-	free_list_head = new_dir->next_free;
+	free_head = new_dir->next_free;
 
 	/* Open directory */
 	int fd = open(path, O_RDONLY);
 	if (fd == -1) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
-		new_dir->next_free = free_list_head;
-		free_list_head = new_index; /* Return slot to free list */
+		new_dir->next_free = free_head;
+		free_head = new_index; /* Return slot to free list */
 		return -1;
 	}
 
@@ -315,8 +312,8 @@ int monitor_add(const char *path, int section_id) {
 	if (fstat(fd, &dir_stat) == -1) {
 		log_message(LOG_ERR, "Failed to stat directory %s: %s", path, strerror(errno));
 		close(fd);
-		new_dir->next_free = free_list_head;
-		free_list_head = new_index; /* Return slot to free list */
+		new_dir->next_free = free_head;
+		free_head = new_index; /* Return slot to free list */
 		return -1;
 	}
 
@@ -325,43 +322,43 @@ int monitor_add(const char *path, int section_id) {
 	if (!key) {
 		log_message(LOG_ERR, "Failed to allocate memory for hash table key");
 		close(fd);
-		new_dir->next_free = free_list_head;
-		free_list_head = new_index; /* Return slot to free list */
+		new_dir->next_free = free_head;
+		free_head = new_index; /* Return slot to free list */
 		return -1;
 	}
 
 	int ret;
-	khint_t k = kh_put(mon_dir, monitored_dirs_htab, key, &ret);
+	khint_t k = kh_put(mon_dir, dirs_hash, key, &ret);
 	if (ret == -1) {
 		log_message(LOG_ERR, "Failed to add directory to hash table");
 		free(key);
 		close(fd);
-		new_dir->next_free = free_list_head;
-		free_list_head = new_index; /* Return slot to free list */
+		new_dir->next_free = free_head;
+		free_head = new_index; /* Return slot to free list */
 		return -1;
 	}
 
 	/* Add to monitored directories array */
 	new_dir->fd = fd;
-	new_dir->path = kh_key(monitored_dirs_htab, k);
+	new_dir->path = kh_key(dirs_hash, k);
 	new_dir->section_id = section_id;
 	new_dir->device = dir_stat.st_dev;
 	new_dir->inode = dir_stat.st_ino;
-	kh_value(monitored_dirs_htab, k) = new_index;
+	kh_value(dirs_hash, k) = new_index;
 
 	/* Register with kqueue */
 	if (!monitor_register(fd, new_dir)) {
 		/* If registration fails, we need to undo the add */
-		free((void *) kh_key(monitored_dirs_htab, k));
-		kh_del(mon_dir, monitored_dirs_htab, k);
+		free((void *) kh_key(dirs_hash, k));
+		kh_del(mon_dir, dirs_hash, k);
 		close(fd);
 		new_dir->fd = -1;
-		new_dir->next_free = free_list_head;
-		free_list_head = new_index; /* Return slot to free list */
+		new_dir->next_free = free_head;
+		free_head = new_index; /* Return slot to free list */
 		return -1;
 	}
 
-	active_dir_count++;
+	active_count++;
 	log_message(LOG_DEBUG, "Added directory %s to monitoring", path);
 	return new_index;
 }
@@ -381,7 +378,7 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 	/* Directory cache with mtime checking */
 	if (dircache_refresh(md->path, &dir_changed)) {
 		if (dir_changed) {
-			log_message(LOG_DEBUG, "Directory structure changed in %s, detecting new subdirectories", md->path);
+			log_message(LOG_DEBUG, "Structure changed in %s, detecting new subdirectories", md->path);
 			/* Register new subdirectories */
 			int new_dirs = monitor_scan(md->path, md->section_id);
 			log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, md->path);
@@ -408,7 +405,7 @@ void monitor_process(void) {
 	calculate_timeout(events_schedule(), &timeout);
 
 	/* Indefinite wait if no scans and no events */
-	nev = kevent(g_kqueue_fd, NULL, 0, events, INITIAL_MONITOR_CAPACITY,
+	nev = kevent(kqueue_fd, NULL, 0, events, INITIAL_MONITOR_CAPACITY,
 				 (timeout.tv_sec == 0 && timeout.tv_nsec == 0) ? NULL : &timeout);
 
 	if (nev == -1) {
@@ -437,7 +434,7 @@ void monitor_process(void) {
 		if (events[i].flags & EV_ERROR) {
 			log_message(LOG_ERR, "Event error: %s", strerror(events[i].data));
 			int md_idx = (int) (intptr_t) events[i].udata;
-			if (md_idx >= 0 && md_idx < monitored_dirs_capacity) {
+			if (md_idx >= 0 && md_idx < dirs_capacity) {
 				log_message(LOG_WARNING, "Removing invalid watch for index %d", md_idx);
 				monitor_remove(md_idx);
 			}
@@ -445,7 +442,7 @@ void monitor_process(void) {
 		}
 
 		int md_idx = (int) (intptr_t) events[i].udata;
-		if (md_idx >= 0 && md_idx < monitored_dirs_capacity) {
+		if (md_idx >= 0 && md_idx < dirs_capacity) {
 			monitored_dir_t *md = &monitored_dirs[md_idx];
 
 			/* Ensure the directory wasn't removed while the event was pending */
@@ -463,7 +460,7 @@ void monitor_process(void) {
 
 /* Run the filesystem event monitor loop */
 bool monitor_loop(void) {
-	if (g_kqueue_fd == -1) {
+	if (kqueue_fd == -1) {
 		log_message(LOG_ERR, "Invalid kqueue descriptor");
 		return false;
 	}
@@ -481,7 +478,7 @@ bool monitor_loop(void) {
 int monitor_scan(const char *dir_path, int section_id) {
 	queue_t queue;
 	char current_path[PATH_MAX_LEN];
-	int new_dirs_count = 0;
+	int new_count = 0;
 
 	/* Initialize queue */
 	queue_init(&queue);
@@ -493,7 +490,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 	}
 
 	/* Process directories from the queue */
-	while (!queue_is_empty(&queue)) {
+	while (!queue_empty(&queue)) {
 		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
 			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
 			break;
@@ -511,14 +508,14 @@ int monitor_scan(const char *dir_path, int section_id) {
 		for (int i = 0; i < subdir_count; i++) {
 			int dir_idx = monitor_add(subdirs[i], section_id);
 			if (dir_idx >= 0) {
-				new_dirs_count++;
+				new_count++;
 
 				/* Add this directory to the queue for further processing */
 				if (!queue_enqueue(&queue, subdirs[i])) {
 					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
 					dircache_free(subdirs, subdir_count);
 					queue_free(&queue);
-					return new_dirs_count;
+					return new_count;
 				}
 			} else {
 				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
@@ -532,12 +529,12 @@ int monitor_scan(const char *dir_path, int section_id) {
 	/* Clean up queue */
 	queue_free(&queue);
 
-	if (new_dirs_count > 0) {
+	if (new_count > 0) {
 		log_message(LOG_INFO, "Added %d new directories under %s to monitoring",
-					new_dirs_count, dir_path);
+					new_count, dir_path);
 	}
 
-	return new_dirs_count;
+	return new_count;
 }
 
 /* Recursively add a directory and its subdirectories to the watch list */
@@ -557,7 +554,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 	log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
 
 	/* Process directories from the queue */
-	while (!queue_is_empty(&queue)) {
+	while (!queue_empty(&queue)) {
 		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
 			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
 			break;
