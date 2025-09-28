@@ -144,8 +144,9 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		return false;
 	}
 
-	char *current_keys[HASH_TABLE_SIZE] = { NULL };
+	char **current_keys = NULL;
 	int current_key_count = 0;
+	int current_keys_capacity = 0;
 	bool structure_changed = false;
 
 	if (!(dirp = opendir(path))) {
@@ -165,13 +166,18 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			char *key = strdup(full_path);
 			if (!key) continue;
 
-			if (current_key_count < HASH_TABLE_SIZE) {
-				current_keys[current_key_count++] = key;
-			} else {
-				log_message(LOG_WARNING, "Exceeded max subdirectories for temp key tracking");
-				free(key);
-				continue;
+			if (current_key_count >= current_keys_capacity) {
+				int new_capacity = (current_keys_capacity == 0) ? 128 : current_keys_capacity * 2;
+				char **new_keys_arr = realloc(current_keys, new_capacity * sizeof(char *));
+				if (!new_keys_arr) {
+					log_message(LOG_WARNING, "Failed to allocate memory for temp key tracking");
+					free(key);
+					continue;
+				}
+				current_keys = new_keys_arr;
+				current_keys_capacity = new_capacity;
 			}
+			current_keys[current_key_count++] = key;
 
 			ENTRY item = { key, (void *) 1 };
 			ENTRY *result;
@@ -224,6 +230,7 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			log_message(LOG_ERR, "Failed to create replacement hash table for cache: %s", strerror(errno));
 			/* Must free temporary keys before returning */
 			for (int i = 0; i < current_key_count; i++) free(current_keys[i]);
+			free(current_keys);
 			hdestroy_r(&current_htab);
 			return false;
 		}
@@ -252,6 +259,7 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	}
 
 	/* Final cleanup */
+	free(current_keys);
 	dir->mtime = get_mtime(path);
 	hdestroy_r(&current_htab);
 
