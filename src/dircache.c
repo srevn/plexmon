@@ -12,11 +12,8 @@
 #include "logger.h"
 #include "utilities.h"
 
-/* Define the main hash map from string to cached_dir_t* */
-KHASH_MAP_INIT_STR(dir_cache, cached_dir_t *)
-
-/* Hash table for directory cache */
-static khash_t(dir_cache) * dir_cache_htab;
+KHASH_MAP_INIT_STR(dir_cache, cached_dir_t *)   /* Main hash map from string to cached_dir_t* */
+static khash_t(dir_cache) * dir_cache_htab;     /* Hash table for directory cache */
 
 /* Initialize the directory cache */
 bool dircache_init(void) {

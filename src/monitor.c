@@ -18,10 +18,10 @@
 #include "queue.h"
 #include "utilities.h"
 
-KHASH_MAP_INIT_STR(mon_dir, int) /* Define the hash map from string to monitored_dir_t index */
+KHASH_MAP_INIT_STR(mon_dir, int)               /* Hash map from string to monitored_dir_t index */
 
 /* Global variables */
-uintptr_t g_user_event_ident = 0; /* Global user event identifier */
+uintptr_t g_user_event_ident = 0;              /* Global user event identifier */
 
 /* Static variables for monitor implementation */
 #define INITIAL_MONITOR_CAPACITY 256
@@ -226,8 +226,8 @@ void monitor_remove(int index) {
 	}
 }
 
-/* Helper function to check if directory is already being monitored */
-bool is_directory_monitored(const char *path) {
+/* Helper function to check if a directory is already monitored and still valid */
+bool monitor_validate(const char *path) {
 	int index = find_monitored_dir_by_path(path);
 	if (index == -1) {
 		return false;
@@ -268,8 +268,8 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 
 /* Add a directory to the monitoring list */
 int monitor_add(const char *path, int section_id) {
-	if (is_directory_monitored(path)) {
-		log_message(LOG_DEBUG, "Directory %s is already being monitored", path);
+	if (monitor_validate(path)) {
+		log_message(LOG_DEBUG, "Directory %s is already being monitored and is valid", path);
 		return find_monitored_dir_by_path(path);
 	}
 
@@ -504,8 +504,8 @@ int monitor_scan(const char *dir_path, int section_id) {
 
 		/* Check each subdirectory */
 		for (int i = 0; i < subdir_count; i++) {
-			/* Skip if already monitored */
-			if (is_directory_monitored(subdirs[i])) {
+			/* Skip if already monitored and valid */
+			if (monitor_validate(subdirs[i])) {
 				continue;
 			}
 
@@ -564,8 +564,8 @@ bool monitor_tree(const char *dir_path, int section_id) {
 			break; /* Should not happen */
 		}
 
-		/* Add current directory to monitoring if not already monitored */
-		if (!is_directory_monitored(current_path)) {
+		/* Add current directory to monitoring if not already monitored and valid */
+		if (!monitor_validate(current_path)) {
 			int dir_idx = monitor_add(current_path, section_id);
 			if (dir_idx < 0) {
 				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
