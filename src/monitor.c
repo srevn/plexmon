@@ -436,6 +436,11 @@ void monitor_process(void) {
 
 		if (events[i].flags & EV_ERROR) {
 			log_message(LOG_ERR, "Event error: %s", strerror(events[i].data));
+			int md_idx = (int) (intptr_t) events[i].udata;
+			if (md_idx >= 0 && md_idx < monitored_dirs_capacity) {
+				log_message(LOG_WARNING, "Removing invalid watch for index %d", md_idx);
+				monitor_remove(md_idx);
+			}
 			continue;
 		}
 
