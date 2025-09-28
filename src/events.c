@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -11,15 +12,24 @@
 #include "plexapi.h"
 
 /* Array of pending scans */
-static pending_t pending[MAX_EVENT_FDS];
+static pending_t *pending = NULL;
 static int num_pending = 0;
+static int pending_capacity = 0;
 
 /* Initialize event processor */
 bool events_init(void) {
 	log_message(LOG_INFO, "Initializing event processor");
 
+	/* Allocate initial pending scans array */
+	pending_capacity = 128;
+	pending = malloc(pending_capacity * sizeof(pending_t));
+	if (!pending) {
+		log_message(LOG_ERR, "Failed to allocate memory for pending scans");
+		return false;
+	}
+
 	/* Reset pending scans */
-	memset(pending, 0, sizeof(pending));
+	memset(pending, 0, pending_capacity * sizeof(pending_t));
 	num_pending = 0;
 
 	return true;
@@ -28,7 +38,10 @@ bool events_init(void) {
 /* Clean up event processor */
 void events_cleanup(void) {
 	log_message(LOG_INFO, "Cleaning up event processor");
+	free(pending);
+	pending = NULL;
 	num_pending = 0;
+	pending_capacity = 0;
 }
 
 /* Find a pending scan by path */
@@ -127,22 +140,29 @@ void events_handle(const char *path, int section_id) {
 		log_message(LOG_DEBUG, "Rescheduled scan for %s to coalesce with new event", path);
 	} else {
 		/* Check if this path is a parent of any pending scans */
-		int child_indices[MAX_EVENT_FDS];
+		int child_indices[256];
 		int num_children = 0;
+		const int max_children = sizeof(child_indices) / sizeof(child_indices[0]);
 
-		pending_child(path, child_indices, &num_children, MAX_EVENT_FDS);
+		pending_child(path, child_indices, &num_children, max_children);
 
 		if (num_children > 0) {
 			/* This is a parent directory of one or more pending scans */
 			log_message(LOG_DEBUG, "Path %s is parent of %d pending scans, consolidating", path, num_children);
 
-			/* Create a new scan for this parent directory */
-			if (num_pending >= MAX_EVENT_FDS) {
-				/* Use one of the child slots */
-				idx = child_indices[0];
-			} else {
-				idx = num_pending++;
+			/* Ensure capacity for the new parent scan */
+			if (num_pending >= pending_capacity) {
+				int new_capacity = pending_capacity > 0 ? pending_capacity * 2 : 128;
+				pending_t *new_pending = realloc(pending, new_capacity * sizeof(pending_t));
+				if (!new_pending) {
+					log_message(LOG_ERR, "Failed to reallocate pending scans, cannot consolidate for %s", path);
+					return; /* Cannot schedule, so just return. */
+				}
+				pending = new_pending;
+				pending_capacity = new_capacity;
+				log_message(LOG_DEBUG, "Expanded pending scans capacity to %d", new_capacity);
 			}
+			idx = num_pending++;
 
 			/* Set up the parent scan */
 			strncpy(pending[idx].path, path, PATH_MAX_LEN - 1);
@@ -152,37 +172,29 @@ void events_handle(const char *path, int section_id) {
 			pending[idx].scheduled_time = now + debounce_delay;
 			pending[idx].is_pending = true;
 
-			/* Mark child scans as not pending (except the one we reused) */
+			/* Mark child scans as not pending */
 			for (int i = 0; i < num_children; i++) {
-				if (child_indices[i] != idx) {
-					pending[child_indices[i]].is_pending = false;
-					log_message(LOG_DEBUG, "Removed child scan %s in favor of parent %s",
-								pending[child_indices[i]].path, path);
-				}
+				pending[child_indices[i]].is_pending = false;
+				log_message(LOG_DEBUG, "Removed child scan %s in favor of parent %s",
+							pending[child_indices[i]].path, path);
 			}
 
 			log_message(LOG_DEBUG, "Scheduled new parent scan for %s (replaced %d child scans)",
 						path, num_children);
 		} else {
 			/* New pending scan with no related existing scans */
-			if (num_pending >= MAX_EVENT_FDS) {
-				/* Find the oldest scheduled scan to replace */
-				time_t oldest_time = now + 86400; /* Initialize with distant future */
-				idx = 0;
-
-				for (int i = 0; i < num_pending; i++) {
-					if (pending[i].is_pending &&
-						pending[i].scheduled_time < oldest_time) {
-						oldest_time = pending[i].scheduled_time;
-						idx = i;
-					}
+			if (num_pending >= pending_capacity) {
+				int new_capacity = pending_capacity > 0 ? pending_capacity * 2 : 128;
+				pending_t *new_pending = realloc(pending, new_capacity * sizeof(pending_t));
+				if (!new_pending) {
+					log_message(LOG_ERR, "Failed to reallocate pending scans, cannot schedule new scan for %s", path);
+					return; /* Cannot schedule, so just return. */
 				}
-
-				log_message(LOG_DEBUG, "Replacing oldest pending scan (%s) with new scan",
-							pending[idx].path);
-			} else {
-				idx = num_pending++;
+				pending = new_pending;
+				pending_capacity = new_capacity;
+				log_message(LOG_DEBUG, "Expanded pending scans capacity to %d", new_capacity);
 			}
+			idx = num_pending++;
 
 			strncpy(pending[idx].path, path, PATH_MAX_LEN - 1);
 			pending[idx].path[PATH_MAX_LEN - 1] = '\0';
