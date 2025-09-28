@@ -9,11 +9,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "../lib/khash.h"
 
 #include "config.h"
 #include "dircache.h"
 #include "events.h"
-#include "khash.h"
 #include "logger.h"
 #include "queue.h"
 #include "utilities.h"

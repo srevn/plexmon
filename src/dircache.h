@@ -3,8 +3,7 @@
 
 #include <stdbool.h>
 #include <time.h>
-
-#include "khash.h"
+#include "../lib/khash.h"
 
 #define PATH_MAX_LEN 1024             /* Maximum length for filesystem paths */
 KHASH_SET_INIT_STR(str_set)           /* Define a hash set of strings */
