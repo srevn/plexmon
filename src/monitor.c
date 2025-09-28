@@ -492,12 +492,11 @@ int monitor_scan(const char *dir_path, int section_id) {
 		return 0;
 	}
 
-	log_message(LOG_DEBUG, "Detecting new subdirectories starting from %s", dir_path);
-
 	/* Process directories from the queue */
 	while (!queue_is_empty(&queue)) {
-		if (!queue_dequeue(&queue, current_path)) {
-			break; /* Should not happen */
+		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
+			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
+			break;
 		}
 
 		/* Get subdirectories */
@@ -559,8 +558,9 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 	/* Process directories from the queue */
 	while (!queue_is_empty(&queue)) {
-		if (!queue_dequeue(&queue, current_path)) {
-			break; /* Should not happen */
+		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
+			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
+			break;
 		}
 
 		/* Add current directory to monitoring */
