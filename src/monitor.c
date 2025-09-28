@@ -569,21 +569,19 @@ bool monitor_tree(const char *dir_path, int section_id) {
 			continue;
 		}
 
-		/* Get subdirectories */
+		/* Refresh directory cache and get subdirectories */
+		bool dir_changed;
+		if (!dircache_refresh(current_path, &dir_changed)) {
+			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
+			continue;
+		}
+
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (!subdirs) {
-			/* Cache miss, update it and try again */
-			bool dir_changed = false;
-			if (dircache_refresh(current_path, &dir_changed)) {
-				subdirs = dircache_subdirs(current_path, &subdir_count);
-			}
-
-			if (!subdirs) {
-				log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
-				continue;
-			}
+			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
+			continue;
 		}
 
 		/* Add all subdirectories to queue */
