@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +23,11 @@ uintptr_t g_user_event_ident = 0;
 
 /* Array of monitored directories */
 static monitored_dir_t monitored_dirs[MAX_EVENT_FDS];
-static int num_monitored_dirs = 0;
+static int num_monitored_dirs = 0; /* High-water mark for the array */
+
+/* Hash table for fast path lookups */
+static struct hsearch_data monitored_dirs_htab;
+static bool htab_initialized = false;
 
 /* Global kqueue descriptor */
 static int g_kqueue_fd = -1;
@@ -44,6 +49,16 @@ bool monitor_init(void) {
 		log_message(LOG_ERR, "Failed to create kqueue: %s", strerror(errno));
 		return false;
 	}
+
+	/* Initialize hash table for path lookups */
+	memset(&monitored_dirs_htab, 0, sizeof(monitored_dirs_htab));
+	if (!hcreate_r(MAX_EVENT_FDS * 2, &monitored_dirs_htab)) {
+		log_message(LOG_ERR, "Failed to create monitored dirs hash table: %s", strerror(errno));
+		close(g_kqueue_fd);
+		g_kqueue_fd = -1;
+		return false;
+	}
+	htab_initialized = true;
 
 	/* Set up user event for clean wake-up */
 	struct kevent kev;
@@ -77,6 +92,12 @@ void monitor_cleanup(void) {
 	if (g_kqueue_fd != -1) {
 		close(g_kqueue_fd);
 		g_kqueue_fd = -1;
+	}
+
+	/* Destroy the hash table */
+	if (htab_initialized) {
+		hdestroy_r(&monitored_dirs_htab);
+		htab_initialized = false;
 	}
 
 	num_monitored_dirs = 0;
@@ -121,16 +142,39 @@ int monitor_get_kqueue_fd(void) {
 
 /* Return the current count of monitored directories */
 int monitor_count(void) {
-	return num_monitored_dirs;
+	int count = 0;
+	for (int i = 0; i < num_monitored_dirs; i++) {
+		if (monitored_dirs[i].fd != -1) {
+			count++;
+		}
+	}
+	return count;
 }
 
 /* Helper function to find a monitored directory by its path */
 static int find_monitored_dir_by_path(const char *path) {
-	for (int i = 0; i < num_monitored_dirs; i++) {
-		if (strcmp(monitored_dirs[i].path, path) == 0) {
-			return i;
+	if (!htab_initialized) {
+		/* Fallback to linear search if hash table not ready */
+		for (int i = 0; i < num_monitored_dirs; i++) {
+			if (monitored_dirs[i].fd != -1 && strcmp(monitored_dirs[i].path, path) == 0) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	ENTRY item;
+	item.key = (char *) path;
+	ENTRY *found_item;
+
+	if (hsearch_r(item, FIND, &found_item, &monitored_dirs_htab)) {
+		monitored_dir_t *dir = (monitored_dir_t *) found_item->data;
+		/* Check if the found dir is active */
+		if (dir && dir->fd != -1) {
+			return (int) (dir - monitored_dirs);
 		}
 	}
+
 	return -1;
 }
 
@@ -173,36 +217,24 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 	return true;
 }
 
-/* Remove a directory from the monitoring list */
+/* Remove a directory from the monitoring list by marking it as inactive */
 void monitor_remove(int index) {
 	if (index < 0 || index >= num_monitored_dirs) {
 		return;
 	}
 
+	monitored_dir_t *dir = &monitored_dirs[index];
+
 	/* Close file descriptor if valid */
-	if (monitored_dirs[index].fd >= 0) {
-		close(monitored_dirs[index].fd);
+	if (dir->fd >= 0) {
+		log_message(LOG_DEBUG, "Removing directory %s from monitoring", dir->path);
+		close(dir->fd);
+		dir->fd = -1; /* Mark as inactive */
 	}
-
-	/* Shift remaining entries down */
-	for (int i = index; i < num_monitored_dirs - 1; i++) {
-		monitored_dirs[i] = monitored_dirs[i + 1];
-	}
-
-	/* Clear the last entry */
-	memset(&monitored_dirs[num_monitored_dirs - 1], 0, sizeof(monitored_dir_t));
-	monitored_dirs[num_monitored_dirs - 1].fd = -1;
-
-	num_monitored_dirs--;
 }
 
 /* Add a directory to the monitoring list */
 int monitor_add(const char *path, int plex_section_id) {
-	if (num_monitored_dirs >= MAX_EVENT_FDS) {
-		log_message(LOG_ERR, "Maximum number of monitored directories reached");
-		return -1;
-	}
-
 	/* Check if the directory is already being monitored */
 	int index = find_monitored_dir_by_path(path);
 	if (index != -1) {
@@ -221,6 +253,23 @@ int monitor_add(const char *path, int plex_section_id) {
 		}
 	}
 
+	/* Find an empty slot or use a new one */
+	int new_index = -1;
+	for (int i = 0; i < num_monitored_dirs; i++) {
+		if (monitored_dirs[i].fd == -1) {
+			new_index = i;
+			break;
+		}
+	}
+
+	if (new_index == -1) {
+		if (num_monitored_dirs >= MAX_EVENT_FDS) {
+			log_message(LOG_ERR, "Maximum number of monitored directories reached");
+			return -1;
+		}
+		new_index = num_monitored_dirs++;
+	}
+
 	/* Open directory */
 	int fd = open(path, O_RDONLY);
 	if (fd == -1) {
@@ -237,20 +286,45 @@ int monitor_add(const char *path, int plex_section_id) {
 	}
 
 	/* Add to monitored directories */
-	monitored_dirs[num_monitored_dirs].fd = fd;
-	strncpy(monitored_dirs[num_monitored_dirs].path, path, PATH_MAX_LEN - 1);
-	monitored_dirs[num_monitored_dirs].path[PATH_MAX_LEN - 1] = '\0';
-	monitored_dirs[num_monitored_dirs].plex_section_id = plex_section_id;
-	monitored_dirs[num_monitored_dirs].device = dir_stat.st_dev;
-	monitored_dirs[num_monitored_dirs].inode = dir_stat.st_ino;
+	monitored_dir_t *new_dir = &monitored_dirs[new_index];
+	new_dir->fd = fd;
+	strncpy(new_dir->path, path, PATH_MAX_LEN - 1);
+	new_dir->path[PATH_MAX_LEN - 1] = '\0';
+	new_dir->plex_section_id = plex_section_id;
+	new_dir->device = dir_stat.st_dev;
+	new_dir->inode = dir_stat.st_ino;
+
+	/* Add to hash table for fast lookups */
+	if (htab_initialized) {
+		char *key = strdup(path);
+		if (!key) {
+			log_message(LOG_ERR, "Failed to allocate memory for hash table key");
+			close(fd);
+			new_dir->fd = -1; /* Mark slot as unused again */
+			return -1;
+		}
+
+		ENTRY item;
+		item.key = key;
+		item.data = new_dir;
+		ENTRY *result;
+		if (!hsearch_r(item, ENTER, &result, &monitored_dirs_htab)) {
+			log_message(LOG_ERR, "Failed to add directory to hash table: %s", strerror(errno));
+			free(key); /* Clean up the key we failed to insert */
+			close(fd);
+			new_dir->fd = -1; /* Mark slot as unused again */
+			return -1;
+		}
+	}
 
 	/* Register with kqueue */
-	if (!monitor_register(fd, &monitored_dirs[num_monitored_dirs])) {
+	if (!monitor_register(fd, new_dir)) {
 		close(fd);
+		new_dir->fd = -1;
 		return -1;
 	}
 
-	return num_monitored_dirs++;
+	return new_index;
 }
 
 /* Handle directory events */
