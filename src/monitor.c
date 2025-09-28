@@ -510,11 +510,6 @@ int monitor_scan(const char *dir_path, int section_id) {
 
 		/* Check each subdirectory */
 		for (int i = 0; i < subdir_count; i++) {
-			/* Skip if already monitored and valid */
-			if (monitor_validate(subdirs[i])) {
-				continue;
-			}
-
 			int dir_idx = monitor_add(subdirs[i], section_id);
 			if (dir_idx >= 0) {
 				new_dirs_count++;
