@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 
 #include "config.h"
 #include "logger.h"
@@ -18,7 +17,7 @@
 static struct hsearch_data dir_cache_htab;
 static int dir_cache_count = 0;
 
-static cache_entry_tracker_t *entry_tracker_head = NULL;
+static cache_tracker_t *entry_tracker_head = NULL;
 
 /* Initialize the directory cache */
 bool dircache_init(void) {
@@ -38,7 +37,7 @@ bool dircache_init(void) {
 
 /* Add entry to the tracker */
 static bool track_cache_entry(char *key, cached_dir_t *dir) {
-	cache_entry_tracker_t *tracker = malloc(sizeof(cache_entry_tracker_t));
+	cache_tracker_t *tracker = malloc(sizeof(cache_tracker_t));
 	if (!tracker) {
 		return false;
 	}
@@ -57,7 +56,7 @@ void dircache_cleanup(void) {
 
 	/* Free all tracked entries */
 	while (entry_tracker_head) {
-		cache_entry_tracker_t *to_free = entry_tracker_head;
+		cache_tracker_t *to_free = entry_tracker_head;
 		entry_tracker_head = entry_tracker_head->next;
 
 		/* Free all data associated with the cached directory */

@@ -18,19 +18,15 @@
 #include "queue.h"
 #include "utilities.h"
 
-/* Global user event identifier */
-uintptr_t g_user_event_ident = 0;
+/* Global variables */
+uintptr_t g_user_event_ident = 0;                  /* Global user event identifier */
 
-/* Array of monitored directories */
-static monitored_dir_t monitored_dirs[MAX_EVENT_FDS];
-static int num_monitored_dirs = 0; /* High-water mark for the array */
-
-/* Hash table for fast path lookups */
-static struct hsearch_data monitored_dirs_htab;
-static bool htab_initialized = false;
-
-/* Global kqueue descriptor */
-static int g_kqueue_fd = -1;
+/* Static variables for monitor implementation */
+static monitored_dir_t monitored_dirs[MAX_EVENT_FDS]; /* Array of monitored directories */
+static int num_monitored_dirs = 0;                 /* High-water mark for the array */
+static struct hsearch_data monitored_dirs_htab;    /* Hash table for fast path lookups */
+static bool htab_initialized = false;              /* Hash table initialization flag */
+static int g_kqueue_fd = -1;                       /* Global kqueue descriptor */
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {

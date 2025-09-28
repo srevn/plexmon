@@ -1,12 +1,10 @@
 #include <errno.h>
 #include <getopt.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -16,7 +14,7 @@
 #include "monitor.h"
 #include "plexapi.h"
 
-#define PLEXMON_VERSION "1.0.0" /* Version information */
+#define PLEXMON_VERSION "1.0.0"         /* Version information */
 
 volatile sig_atomic_t g_running = 1;    /* Global running flag */
 FILE *g_log_file = NULL;                /* Global log file handle */

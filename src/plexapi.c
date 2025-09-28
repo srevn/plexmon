@@ -3,7 +3,6 @@
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,10 +10,8 @@
 #include "config.h"
 #include "logger.h"
 #include "monitor.h"
-#include "utilities.h"
 
-/* CURL handle */
-static CURL *curl_handle = NULL;
+static CURL *curl_handle = NULL;        /* CURL handle */
 
 /* Callback for writing curl response data */
 static size_t curl_write(void *contents, size_t size, size_t nmemb, void *userp) {
