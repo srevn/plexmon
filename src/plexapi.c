@@ -17,7 +17,7 @@
 static CURL *curl_handle = NULL;
 
 /* Callback for writing curl response data */
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+static size_t curl_write(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t realsize = size * nmemb;
 	curl_response_t *mem = (curl_response_t *) userp;
 
@@ -35,6 +35,23 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 	return realsize;
 }
 
+/* Create curl headers for Plex API requests */
+static struct curl_slist *curl_headers(void) {
+	struct curl_slist *headers = NULL;
+
+	/* Set common headers */
+	headers = curl_slist_append(headers, "Accept: application/json");
+
+	/* Add auth token if available */
+	if (strlen(g_config.plex_token) > 0) {
+		char auth_header[TOKEN_MAX_LEN + 20];
+		snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
+		headers = curl_slist_append(headers, auth_header);
+	}
+
+	return headers;
+}
+
 /* Initialize Plex API client */
 bool plexapi_init(void) {
 	log_message(LOG_INFO, "Initializing Plex API client");
@@ -50,7 +67,7 @@ bool plexapi_init(void) {
 
 	/* Set common curl options */
 	curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_callback);
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, curl_write);
 
 	return true;
 }
@@ -87,13 +104,7 @@ bool plexapi_check(void) {
 	snprintf(url, sizeof(url), "%s/identity", g_config.plex_url);
 
 	/* Set up headers */
-	headers = curl_slist_append(headers, "Accept: application/json");
-
-	if (strlen(g_config.plex_token) > 0) {
-		char auth_header[TOKEN_MAX_LEN + 20];
-		snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
-		headers = curl_slist_append(headers, auth_header);
-	}
+	headers = curl_headers();
 
 	/* Set curl options */
 	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
@@ -232,11 +243,7 @@ bool plexapi_libraries(void) {
 	snprintf(url, sizeof(url), "%s/library/sections", g_config.plex_url);
 
 	/* Set up headers */
-	headers = curl_slist_append(headers, "Accept: application/json");
-
-	char auth_header[TOKEN_MAX_LEN + 20];
-	snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
-	headers = curl_slist_append(headers, auth_header);
+	headers = curl_headers();
 
 	/* Set curl options */
 	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
@@ -321,11 +328,7 @@ bool plexapi_scan(const char *path, int section_id) {
 	}
 
 	/* Set up headers */
-	headers = curl_slist_append(headers, "Accept: application/json");
-
-	char auth_header[TOKEN_MAX_LEN + 20];
-	snprintf(auth_header, sizeof(auth_header), "X-Plex-Token: %s", g_config.plex_token);
-	headers = curl_slist_append(headers, auth_header);
+	headers = curl_headers();
 
 	/* Set curl options */
 	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
