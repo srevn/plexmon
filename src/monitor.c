@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,19 +13,21 @@
 #include "config.h"
 #include "dircache.h"
 #include "events.h"
+#include "khash.h"
 #include "logger.h"
 #include "queue.h"
 #include "utilities.h"
 
+KHASH_MAP_INIT_STR(mon_dir, monitored_dir_t *)       /* Define the hash map from string to monitored_dir_t* */
+
 /* Global variables */
-uintptr_t g_user_event_ident = 0;                  /* Global user event identifier */
+uintptr_t g_user_event_ident = 0; /* Global user event identifier */
 
 /* Static variables for monitor implementation */
 static monitored_dir_t monitored_dirs[MAX_EVENT_FDS]; /* Array of monitored directories */
-static int num_monitored_dirs = 0;                 /* High-water mark for the array */
-static struct hsearch_data monitored_dirs_htab;    /* Hash table for fast path lookups */
-static bool htab_initialized = false;              /* Hash table initialization flag */
-static int g_kqueue_fd = -1;                       /* Global kqueue descriptor */
+static int num_monitored_dirs = 0;					  /* High-water mark for the array */
+static khash_t(mon_dir) * monitored_dirs_htab;		  /* Hash table for fast path lookups */
+static int g_kqueue_fd = -1;						  /* Global kqueue descriptor */
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {
@@ -47,14 +48,13 @@ bool monitor_init(void) {
 	}
 
 	/* Initialize hash table for path lookups */
-	memset(&monitored_dirs_htab, 0, sizeof(monitored_dirs_htab));
-	if (!hcreate_r(MAX_EVENT_FDS * 2, &monitored_dirs_htab)) {
-		log_message(LOG_ERR, "Failed to create monitored dirs hash table: %s", strerror(errno));
+	monitored_dirs_htab = kh_init(mon_dir);
+	if (!monitored_dirs_htab) {
+		log_message(LOG_ERR, "Failed to create monitored dirs hash table");
 		close(g_kqueue_fd);
 		g_kqueue_fd = -1;
 		return false;
 	}
-	htab_initialized = true;
 
 	/* Set up user event for clean wake-up */
 	struct kevent kev;
@@ -65,6 +65,8 @@ bool monitor_init(void) {
 		log_message(LOG_ERR, "Failed to register user event: %s", strerror(errno));
 		close(g_kqueue_fd);
 		g_kqueue_fd = -1;
+		kh_destroy(mon_dir, monitored_dirs_htab);
+		monitored_dirs_htab = NULL;
 		return false;
 	}
 
@@ -91,9 +93,15 @@ void monitor_cleanup(void) {
 	}
 
 	/* Destroy the hash table */
-	if (htab_initialized) {
-		hdestroy_r(&monitored_dirs_htab);
-		htab_initialized = false;
+	if (monitored_dirs_htab) {
+		khint_t k;
+		for (k = kh_begin(monitored_dirs_htab); k != kh_end(monitored_dirs_htab); ++k) {
+			if (kh_exist(monitored_dirs_htab, k)) {
+				free((void *) kh_key(monitored_dirs_htab, k));
+			}
+		}
+		kh_destroy(mon_dir, monitored_dirs_htab);
+		monitored_dirs_htab = NULL;
 	}
 
 	num_monitored_dirs = 0;
@@ -149,22 +157,13 @@ int monitor_count(void) {
 
 /* Helper function to find a monitored directory by its path */
 static int find_monitored_dir_by_path(const char *path) {
-	if (!htab_initialized) {
-		/* Fallback to linear search if hash table not ready */
-		for (int i = 0; i < num_monitored_dirs; i++) {
-			if (monitored_dirs[i].fd != -1 && strcmp(monitored_dirs[i].path, path) == 0) {
-				return i;
-			}
-		}
+	if (!monitored_dirs_htab) {
 		return -1;
 	}
 
-	ENTRY item;
-	item.key = (char *) path;
-	ENTRY *found_item;
-
-	if (hsearch_r(item, FIND, &found_item, &monitored_dirs_htab)) {
-		monitored_dir_t *dir = (monitored_dir_t *) found_item->data;
+	khint_t k = kh_get(mon_dir, monitored_dirs_htab, path);
+	if (k != kh_end(monitored_dirs_htab)) {
+		monitored_dir_t *dir = kh_value(monitored_dirs_htab, k);
 		/* Check if the found dir is active */
 		if (dir && dir->fd != -1) {
 			return (int) (dir - monitored_dirs);
@@ -172,6 +171,31 @@ static int find_monitored_dir_by_path(const char *path) {
 	}
 
 	return -1;
+}
+
+/* Remove a directory from the monitoring list by marking it as inactive */
+void monitor_remove(int index) {
+	if (index < 0 || index >= num_monitored_dirs) {
+		return;
+	}
+
+	monitored_dir_t *dir = &monitored_dirs[index];
+
+	/* Close file descriptor if valid */
+	if (dir->fd >= 0) {
+		log_message(LOG_DEBUG, "Removing directory %s from monitoring", dir->path);
+		close(dir->fd);
+		dir->fd = -1; /* Mark as inactive */
+	}
+
+	/* Remove from hash table */
+	if (monitored_dirs_htab) {
+		khint_t k = kh_get(mon_dir, monitored_dirs_htab, dir->path);
+		if (k != kh_end(monitored_dirs_htab)) {
+			free((void *) kh_key(monitored_dirs_htab, k));
+			kh_del(mon_dir, monitored_dirs_htab, k);
+		}
+	}
 }
 
 /* Helper function to check if directory is already being monitored */
@@ -213,40 +237,11 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 	return true;
 }
 
-/* Remove a directory from the monitoring list by marking it as inactive */
-void monitor_remove(int index) {
-	if (index < 0 || index >= num_monitored_dirs) {
-		return;
-	}
-
-	monitored_dir_t *dir = &monitored_dirs[index];
-
-	/* Close file descriptor if valid */
-	if (dir->fd >= 0) {
-		log_message(LOG_DEBUG, "Removing directory %s from monitoring", dir->path);
-		close(dir->fd);
-		dir->fd = -1; /* Mark as inactive */
-	}
-}
-
 /* Add a directory to the monitoring list */
 int monitor_add(const char *path, int plex_section_id) {
-	/* Check if the directory is already being monitored */
-	int index = find_monitored_dir_by_path(path);
-	if (index != -1) {
-		/* It's in our list. Verify if it's still the same directory. */
-		struct stat path_stat;
-		monitored_dir_t *dir = &monitored_dirs[index];
-
-		if (dir->fd >= 0 && stat(path, &path_stat) == 0 &&
-			path_stat.st_dev == dir->device && path_stat.st_ino == dir->inode) {
-			log_message(LOG_DEBUG, "Directory %s is already being monitored", path);
-			return index;
-		} else {
-			/* Stale entry. Remove it before adding the new one. */
-			log_message(LOG_DEBUG, "Removing stale monitor for path %s before re-adding", path);
-			monitor_remove(index);
-		}
+	if (is_directory_monitored(path)) {
+		log_message(LOG_DEBUG, "Directory %s is already being monitored", path);
+		return find_monitored_dir_by_path(path);
 	}
 
 	/* Find an empty slot or use a new one */
@@ -291,30 +286,30 @@ int monitor_add(const char *path, int plex_section_id) {
 	new_dir->inode = dir_stat.st_ino;
 
 	/* Add to hash table for fast lookups */
-	if (htab_initialized) {
-		char *key = strdup(path);
-		if (!key) {
-			log_message(LOG_ERR, "Failed to allocate memory for hash table key");
-			close(fd);
-			new_dir->fd = -1; /* Mark slot as unused again */
-			return -1;
-		}
-
-		ENTRY item;
-		item.key = key;
-		item.data = new_dir;
-		ENTRY *result;
-		if (!hsearch_r(item, ENTER, &result, &monitored_dirs_htab)) {
-			log_message(LOG_ERR, "Failed to add directory to hash table: %s", strerror(errno));
-			free(key); /* Clean up the key we failed to insert */
-			close(fd);
-			new_dir->fd = -1; /* Mark slot as unused again */
-			return -1;
-		}
+	char *key = strdup(path);
+	if (!key) {
+		log_message(LOG_ERR, "Failed to allocate memory for hash table key");
+		close(fd);
+		new_dir->fd = -1; /* Mark slot as unused again */
+		return -1;
 	}
+
+	int ret;
+	khint_t k = kh_put(mon_dir, monitored_dirs_htab, key, &ret);
+	if (ret == -1) {
+		log_message(LOG_ERR, "Failed to add directory to hash table");
+		free(key);
+		close(fd);
+		new_dir->fd = -1; /* Mark slot as unused again */
+		return -1;
+	}
+	kh_value(monitored_dirs_htab, k) = new_dir;
 
 	/* Register with kqueue */
 	if (!monitor_register(fd, new_dir)) {
+		/* If registration fails, we need to undo the add */
+		free((void *) kh_key(monitored_dirs_htab, k));
+		kh_del(mon_dir, monitored_dirs_htab, k);
 		close(fd);
 		new_dir->fd = -1;
 		return -1;
