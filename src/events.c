@@ -8,7 +8,6 @@
 
 #include "config.h"
 #include "logger.h"
-#include "monitor.h"
 #include "plexapi.h"
 
 /* Array of pending scans */

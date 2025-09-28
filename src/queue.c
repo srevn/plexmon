@@ -11,13 +11,13 @@ void queue_init(queue_t *queue) {
 
 /* Add an item to the queue (enqueue) */
 bool queue_enqueue(queue_t *queue, const char *path) {
-	node_t *new_node = malloc(sizeof(node_t));
+	size_t path_len = strlen(path);
+	node_t *new_node = malloc(sizeof(node_t) + path_len + 1);
 	if (!new_node) {
 		return false;
 	}
 
-	strncpy(new_node->path, path, PATH_MAX_LEN - 1);
-	new_node->path[PATH_MAX_LEN - 1] = '\0';
+	strcpy(new_node->path, path);
 	new_node->next = NULL;
 
 	if (queue->rear == NULL) {
@@ -41,8 +41,7 @@ bool queue_dequeue(queue_t *queue, char *path) {
 
 	node_t *temp = queue->front;
 
-	strncpy(path, temp->path, PATH_MAX_LEN - 1);
-	path[PATH_MAX_LEN - 1] = '\0';
+	strcpy(path, temp->path);
 
 	queue->front = queue->front->next;
 

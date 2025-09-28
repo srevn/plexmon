@@ -3,9 +3,10 @@
 
 #include <stdbool.h>
 #include <time.h>
-#include "../lib/khash.h"
 
-#define PATH_MAX_LEN 1024             /* Maximum length for filesystem paths */
+#include "../lib/khash.h"
+#include "config.h"
+
 KHASH_SET_INIT_STR(str_set)           /* Define a hash set of strings */
 
 /* Structure to represent a cached directory with metadata */

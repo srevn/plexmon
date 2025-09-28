@@ -5,7 +5,8 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
-#define PATH_MAX_LEN 1024                  /* Maximum length for filesystem paths */
+#include "config.h"
+
 #define USER_EVENT_EXIT 1                  /* User event identifier for exit signal */
 #define USER_EVENT_RELOAD 2                /* User event identifier for reload signal */
 

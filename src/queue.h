@@ -2,14 +2,12 @@
 #define QUEUE_H
 
 #include <stdbool.h>
-
-/* Queue configuration */
-#define PATH_MAX_LEN 1024                  /* Maximum length for filesystem paths */
+#include "config.h"
 
 /* Node structure for the directory queue linked list */
 typedef struct node {
-	char path[PATH_MAX_LEN];               /* Full path to directory in queue */
 	struct node *next;                     /* Pointer to next node in linked list */
+	char path[];                           /* Flexible array member for the path */
 } node_t;
 
 /* Queue structure for breadth-first directory traversal */
