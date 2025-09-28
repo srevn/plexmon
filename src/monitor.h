@@ -5,8 +5,6 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
-/* Monitor configuration */
-#define MAX_EVENT_FDS 4096                 /* Maximum number of monitored file descriptors */
 #define PATH_MAX_LEN 1024                  /* Maximum length for filesystem paths */
 #define USER_EVENT_EXIT 1                  /* User event identifier for exit signal */
 #define USER_EVENT_RELOAD 2                /* User event identifier for reload signal */
@@ -18,10 +16,11 @@ extern volatile sig_atomic_t g_running;    /* Global running flag for signal saf
 /* Structure to hold a monitored directory */
 typedef struct {
 	int fd;                                /* File descriptor for kqueue monitoring */
-	char path[PATH_MAX_LEN];               /* Full path to the monitored directory */
-	int plex_section_id;                   /* Associated Plex library section ID */
+	const char *path;                      /* Full path to the monitored directory */
+	int section_id;                        /* Associated Plex library section ID */
 	dev_t device;                          /* Device ID for path validation */
 	ino_t inode;                           /* Inode number for path validation */
+	int next_free;                         /* For free-list management of the directories array */
 } monitored_dir_t;
 
 /* Monitor lifecycle management */
@@ -36,7 +35,7 @@ void monitor_reload(void);
 int monitor_get_kqueue_fd(void);
 
 /* Directory management */
-int monitor_add(const char *path, int plex_section_id);
+int monitor_add(const char *path, int section_id);
 void monitor_remove(int index);
 int monitor_count(void);
 bool is_directory_monitored(const char *path);

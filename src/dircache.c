@@ -217,8 +217,6 @@ bool dircache_refresh(const char *path, bool *changed) {
 		}
 
 		/* Initialize new cache entry */
-		strncpy(dir->path, path, PATH_MAX_LEN - 1);
-		dir->path[PATH_MAX_LEN - 1] = '\0';
 		dir->mtime = 0;
 		dir->subdirs = NULL;
 		dir->validated = false;

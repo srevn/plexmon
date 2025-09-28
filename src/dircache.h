@@ -6,12 +6,11 @@
 
 #include "khash.h"
 
-#define PATH_MAX_LEN 1024     /* Maximum length for filesystem paths */
-KHASH_SET_INIT_STR(str_set)   /* Define a hash set of strings */
+#define PATH_MAX_LEN 1024             /* Maximum length for filesystem paths */
+KHASH_SET_INIT_STR(str_set)           /* Define a hash set of strings */
 
 /* Structure to represent a cached directory with metadata */
 typedef struct cached_dir {
-	char path[PATH_MAX_LEN];          /* Full path to the cached directory */
 	time_t mtime;                     /* Last modification time from stat() */
 	khash_t(str_set) *subdirs;        /* Hash set of subdirectories for fast lookups */
 	bool validated;                   /* Whether the cache entry is up-to-date */
