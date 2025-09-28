@@ -183,8 +183,7 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		snprintf(full_path, PATH_MAX_LEN, "%s/%s", path, entry->d_name);
 
 		/* Process subdirectories */
-		if (is_directory(full_path)) {
-			/* Add path to hash table for quick lookups */
+		if (is_directory(full_path, entry->d_type)) { /* Add path to hash table for quick lookups */
 			ENTRY item, *result;
 			char *path_key = strdup(full_path);
 			if (!path_key) {
@@ -250,7 +249,7 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 
 			if (!hsearch_r(search_item, FIND, &result, &new_paths_htab)) {
 				/* Check if the directory actually still exists on filesystem */
-				if (is_directory(current->path)) {
+				if (is_directory(current->path, D_TYPE_UNAVAILABLE)) {
 					log_message(LOG_DEBUG, "Subdirectory removed from cache but still exists: %s", current->path);
 				} else {
 					log_message(LOG_DEBUG, "Subdirectory removed: %s", current->path);

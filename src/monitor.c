@@ -258,7 +258,7 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 	log_message(LOG_INFO, "Change detected in directory: %s (flags: 0x%x)", md->path, fflags);
 
 	/* Check for new subdirectories that need to be monitored */
-	if (!is_directory(md->path)) {
+	if (!is_directory(md->path, D_TYPE_UNAVAILABLE)) {
 		events_handle(md->path, md->plex_section_id);
 		return;
 	}
