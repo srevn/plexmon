@@ -166,7 +166,7 @@ void monitor_reload(void) {
 }
 
 /* Get the kqueue file descriptor */
-int monitor_get_kqueue_fd(void) {
+int monitor_kqueue(void) {
 	return kqueue_fd;
 }
 
@@ -176,7 +176,7 @@ int monitor_count(void) {
 }
 
 /* Helper function to find a monitored directory by its path */
-static int find_monitored_dir_by_path(const char *path) {
+static int path_monitored(const char *path) {
 	if (!dirs_hash) {
 		return -1;
 	}
@@ -225,7 +225,7 @@ void monitor_remove(int index) {
 
 /* Helper function to check if a directory is already monitored and still valid */
 bool monitor_validate(const char *path) {
-	int index = find_monitored_dir_by_path(path);
+	int index = path_monitored(path);
 	if (index == -1) {
 		return false;
 	}
@@ -267,7 +267,7 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 int monitor_add(const char *path, int section_id) {
 	if (monitor_validate(path)) {
 		log_message(LOG_DEBUG, "Directory %s is already being monitored and is valid", path);
-		return find_monitored_dir_by_path(path);
+		return path_monitored(path);
 	}
 
 	/* If no free slots, resize the array */
@@ -378,17 +378,36 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 	/* Directory cache with mtime checking */
 	if (dircache_refresh(md->path, &dir_changed)) {
 		if (dir_changed) {
-			log_message(LOG_DEBUG, "Structure changed in %s, detecting new subdirectories", md->path);
-			/* Register new subdirectories */
-			int new_dirs = monitor_scan(md->path, md->section_id);
-			log_message(LOG_DEBUG, "Registered %d new directories under %s", new_dirs, md->path);
+			log_message(LOG_DEBUG, "Structure changed in %s, detecting new entries",
+						md->path);
+			/* Only add new entries from cache to the monitor */
+			int subdir_count = 0;
+			const char **subdirs = dircache_subdirs(md->path, &subdir_count);
+			int initial_count = monitor_count();
+
+			if (subdirs) {
+				for (int i = 0; i < subdir_count; i++) {
+					if (path_monitored(subdirs[i]) == -1) {
+						monitor_add(subdirs[i], md->section_id);
+					}
+				}
+				dircache_free(subdirs);
+			}
+
+			int new_dirs = monitor_count() - initial_count;
+			if (new_dirs > 0) {
+				log_message(LOG_DEBUG, "Registered %d new directories under %s",
+							new_dirs, md->path);
+			}
 		} else {
 			/* Still queue a Plex scan but skip directory tree rescanning */
-			log_message(LOG_DEBUG, "File change detected in %s, triggering Plex scan without directory rescan", md->path);
+			log_message(LOG_DEBUG, "File change detected in %s, skip directory rescan",
+						md->path);
 		}
 	} else {
 		/* Cache check failed, fall back to targeted refresh */
-		log_message(LOG_WARNING, "Failed to check directory cache for %s, using targeted refresh", md->path);
+		log_message(LOG_WARNING, "Failed to check cache for %s, using targeted refresh",
+					md->path);
 		monitor_scan(md->path, md->section_id);
 	}
 

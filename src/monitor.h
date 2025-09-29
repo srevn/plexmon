@@ -34,7 +34,7 @@ void monitor_exit(void);
 bool monitor_loop(void);
 void monitor_process(void);
 void monitor_reload(void);
-int monitor_get_kqueue_fd(void);
+int monitor_kqueue(void);
 
 /* Directory management */
 int monitor_add(const char *path, int section_id);

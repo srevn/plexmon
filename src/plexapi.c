@@ -234,7 +234,7 @@ bool plexapi_libraries(void) {
 	}
 
 	/* Check if kqueue is valid */
-	if (monitor_get_kqueue_fd() == -1) {
+	if (monitor_kqueue() == -1) {
 		log_message(LOG_ERR, "Invalid kqueue descriptor");
 		return false;
 	}
