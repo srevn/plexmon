@@ -5,8 +5,6 @@
 #include <stdbool.h>
 #include <sys/types.h>
 
-#include "config.h"
-
 #define INITIAL_MONITOR_CAPACITY 256       /* Initial size for monitored directories array */
 #define USER_EVENT_EXIT 1                  /* User event identifier for exit signal */
 #define USER_EVENT_RELOAD 2                /* User event identifier for reload signal */

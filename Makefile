@@ -48,4 +48,4 @@ help:
 	@echo "  clean     - Remove build files"
 	@echo "  help      - Show this help message"
 
-.PHONY: all install clean memcheck help
+.PHONY: all install clean help

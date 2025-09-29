@@ -1,20 +1,18 @@
 #ifndef QUEUE_H
 #define QUEUE_H
 
-#include <stdlib.h>
 #include <stdbool.h>
-#include "config.h"
 
 /* Node structure for the directory queue linked list */
 typedef struct node {
-	struct node *next;                     /* Pointer to next node in linked list */
-	char path[];                           /* Flexible array member for the path */
+	struct node *next;                 /* Pointer to next node in linked list */
+	char path[];                       /* Flexible array member for the path */
 } node_t;
 
 /* Queue structure for breadth-first directory traversal */
 typedef struct {
-	node_t *front;                         /* Pointer to front of queue (dequeue from here) */
-	node_t *rear;                          /* Pointer to rear of queue (enqueue to here) */
+	node_t *front;                     /* Pointer to front of queue (dequeue from here) */
+	node_t *rear;                      /* Pointer to rear of queue (enqueue to here) */
 } queue_t;
 
 /* Queue lifecycle management */

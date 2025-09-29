@@ -6,8 +6,8 @@
 
 /* Structure for HTTP response data from curl */
 typedef struct {
-	char *data;                            /* Response data buffer */
-	size_t size;                           /* Size of response data in bytes */
+	char *data;	                       /* Response data buffer */
+	size_t size;                       /* Size of response data in bytes */
 } curl_response_t;
 
 /* Plex API lifecycle management */

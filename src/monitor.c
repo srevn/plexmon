@@ -3,14 +3,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/event.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "../lib/khash.h"
 
+#include "../lib/khash.h"
 #include "config.h"
 #include "dircache.h"
 #include "events.h"
@@ -28,6 +27,24 @@ static int free_head = -1;					   /* Head of the free list for empty slots */
 static khash_t(mon_dir) * dirs_hash;		   /* Hash table for fast path lookups */
 static int kqueue_fd = -1;					   /* Global kqueue descriptor */
 uintptr_t user_event = 0;					   /* Global user event identifier */
+
+/* Helper function to find a monitored directory by its path */
+static int path_monitored(const char *path) {
+	if (!dirs_hash) {
+		return -1;
+	}
+
+	khint_t k = kh_get(mon_dir, dirs_hash, path);
+	if (k != kh_end(dirs_hash)) {
+		int index = kh_value(dirs_hash, k);
+		/* Check if the found dir is active */
+		if (index >= 0 && index < dirs_capacity && monitored_dirs[index].fd != -1) {
+			return index;
+		}
+	}
+
+	return -1;
+}
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {
@@ -173,24 +190,6 @@ int monitor_kqueue(void) {
 /* Return the current count of monitored directories */
 int monitor_count(void) {
 	return active_count;
-}
-
-/* Helper function to find a monitored directory by its path */
-static int path_monitored(const char *path) {
-	if (!dirs_hash) {
-		return -1;
-	}
-
-	khint_t k = kh_get(mon_dir, dirs_hash, path);
-	if (k != kh_end(dirs_hash)) {
-		int index = kh_value(dirs_hash, k);
-		/* Check if the found dir is active */
-		if (index >= 0 && index < dirs_capacity && monitored_dirs[index].fd != -1) {
-			return index;
-		}
-	}
-
-	return -1;
 }
 
 /* Remove a directory from the monitoring list by marking it as inactive */

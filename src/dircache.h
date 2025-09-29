@@ -5,15 +5,14 @@
 #include <time.h>
 
 #include "../lib/khash.h"
-#include "config.h"
 
-KHASH_SET_INIT_STR(str_set)           /* Define a hash set of strings */
+KHASH_SET_INIT_STR(str_set)            /* Define a hash set of strings */
 
 /* Structure to represent a cached directory with metadata */
 typedef struct cached_dir {
-	time_t mtime;                     /* Last modification time from stat() */
-	khash_t(str_set) *subdirs;        /* Hash set of subdirectories for fast lookups */
-	bool validated;                   /* Whether the cache entry is up-to-date */
+	time_t mtime;                      /* Last modification time from stat() */
+	khash_t(str_set) * subdirs;        /* Hash set of subdirectories for fast lookups */
+	bool validated;                    /* Whether the cache entry is up-to-date */
 } cached_dir_t;
 
 /* Directory cache lifecycle management */

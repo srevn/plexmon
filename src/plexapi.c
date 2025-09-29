@@ -11,7 +11,7 @@
 #include "logger.h"
 #include "monitor.h"
 
-static CURL *curl_handle = NULL;        /* CURL handle */
+static CURL *curl_handle = NULL;           /* CURL handle */
 
 /* Callback for writing curl response data */
 static size_t curl_write(void *contents, size_t size, size_t nmemb, void *userp) {

@@ -3,8 +3,7 @@
 
 #include <stdbool.h>
 
-/* Pass D_TYPE_UNAVAILABLE if d_type is not known from readdir() */
-#define D_TYPE_UNAVAILABLE -1
+#define D_TYPE_UNAVAILABLE -1       /* If d_type is not known from readdir() */
 
 /* Filesystem utility functions */
 bool is_directory(const char *path, int d_type);
