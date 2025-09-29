@@ -27,7 +27,7 @@ static int active_count = 0;				   /* Number of active directories */
 static int free_head = -1;					   /* Head of the free list for empty slots */
 static khash_t(mon_dir) * dirs_hash;		   /* Hash table for fast path lookups */
 static int kqueue_fd = -1;					   /* Global kqueue descriptor */
-uintptr_t user_event = 0;			           /* Global user event identifier */
+uintptr_t user_event = 0;					   /* Global user event identifier */
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {
@@ -494,7 +494,24 @@ int monitor_scan(const char *dir_path, int section_id) {
 	while ((node = queue_dequeue(&queue))) {
 		char *current_path = node->path;
 
-		/* Get subdirectories */
+		/* Refresh the cache for the current directory */
+		bool dir_changed;
+		if (!dircache_refresh(current_path, &dir_changed)) {
+			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
+			free(node);
+			continue;
+		}
+
+		/* Add the current directory to monitoring if it's not already */
+		int dir_idx = monitor_add(current_path, section_id);
+		if (dir_idx < 0) {
+			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+			/* We can continue, as subdirectories might still be processable */
+		} else {
+			new_count++;
+		}
+
+		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
@@ -503,17 +520,8 @@ int monitor_scan(const char *dir_path, int section_id) {
 			continue;
 		}
 
-		/* Check each subdirectory */
+		/* Enqueue all found subdirectories for the next iteration */
 		for (int i = 0; i < subdir_count; i++) {
-			int dir_idx = monitor_add(subdirs[i], section_id);
-			if (dir_idx < 0) {
-				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
-				continue;
-			}
-
-			new_count++;
-
-			/* Add this directory to the queue for further processing */
 			if (!queue_enqueue(&queue, subdirs[i])) {
 				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
 				dircache_free(subdirs, subdir_count);
