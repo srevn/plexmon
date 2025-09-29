@@ -27,7 +27,7 @@ static int active_count = 0;				   /* Number of active directories */
 static int free_head = -1;					   /* Head of the free list for empty slots */
 static khash_t(mon_dir) * dirs_hash;		   /* Hash table for fast path lookups */
 static int kqueue_fd = -1;					   /* Global kqueue descriptor */
-uintptr_t g_user_event_ident = 0;			   /* Global user event identifier */
+uintptr_t user_event = 0;			           /* Global user event identifier */
 
 /* Initialize file system monitoring */
 bool monitor_init(void) {
@@ -72,9 +72,9 @@ bool monitor_init(void) {
 
 	/* Set up user event for clean wake-up */
 	struct kevent kev;
-	g_user_event_ident = getpid(); /* Use PID as the identifier */
+	user_event = getpid(); /* Use PID as the identifier */
 
-	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
+	EV_SET(&kev, user_event, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
 	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to register user event: %s", strerror(errno));
 		close(kqueue_fd);
@@ -142,7 +142,7 @@ void monitor_exit(void) {
 	log_message(LOG_INFO, "Sending exit signal to event loop");
 
 	/* Set up and trigger the user event for exit */
-	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_EXIT, NULL);
+	EV_SET(&kev, user_event, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_EXIT, NULL);
 
 	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to signal exit event: %s", strerror(errno));
@@ -158,7 +158,7 @@ void monitor_reload(void) {
 	log_message(LOG_INFO, "Sending reload signal to event loop");
 
 	/* Set up and trigger the user event for reload */
-	EV_SET(&kev, g_user_event_ident, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_RELOAD, NULL);
+	EV_SET(&kev, user_event, EVFILT_USER, EV_ENABLE, NOTE_TRIGGER, USER_EVENT_RELOAD, NULL);
 
 	if (kevent(kqueue_fd, &kev, 1, NULL, 0, NULL) == -1) {
 		log_message(LOG_ERR, "Failed to signal reload event: %s", strerror(errno));
@@ -418,7 +418,7 @@ void monitor_process(void) {
 	/* Process received events */
 	for (int i = 0; i < nev; i++) {
 		/* Check for user events */
-		if (events[i].filter == EVFILT_USER && events[i].ident == g_user_event_ident) {
+		if (events[i].filter == EVFILT_USER && events[i].ident == user_event) {
 			uint32_t data = events[i].data;
 
 			if (data == USER_EVENT_EXIT) {
@@ -442,15 +442,16 @@ void monitor_process(void) {
 		}
 
 		int md_idx = (int) (intptr_t) events[i].udata;
-		if (md_idx >= 0 && md_idx < dirs_capacity) {
-			monitored_dir_t *md = &monitored_dirs[md_idx];
-
-			/* Ensure the directory wasn't removed while the event was pending */
-			if (md && md->fd >= 0 && events[i].fflags) {
-				monitor_event(md, events[i].fflags);
-			}
-		} else {
+		if (md_idx < 0 || md_idx >= dirs_capacity) {
 			log_message(LOG_WARNING, "Received event for invalid directory index: %d", md_idx);
+			continue;
+		}
+
+		monitored_dir_t *md = &monitored_dirs[md_idx];
+
+		/* Ensure the directory wasn't removed while the event was pending */
+		if (md && md->fd >= 0 && events[i].fflags) {
+			monitor_event(md, events[i].fflags);
 		}
 	}
 
@@ -495,28 +496,33 @@ int monitor_scan(const char *dir_path, int section_id) {
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
-		if (subdirs) {
-			/* Check each subdirectory */
-			for (int i = 0; i < subdir_count; i++) {
-				int dir_idx = monitor_add(subdirs[i], section_id);
-				if (dir_idx >= 0) {
-					new_count++;
-
-					/* Add this directory to the queue for further processing */
-					if (!queue_enqueue(&queue, subdirs[i])) {
-						log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-						dircache_free(subdirs, subdir_count);
-						free(current_path);
-						queue_free(&queue);
-						return new_count;
-					}
-				} else {
-					log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
-				}
-			}
-			/* Free subdirectory list */
-			dircache_free(subdirs, subdir_count);
+		if (!subdirs) {
+			free(current_path);
+			continue;
 		}
+
+		/* Check each subdirectory */
+		for (int i = 0; i < subdir_count; i++) {
+			int dir_idx = monitor_add(subdirs[i], section_id);
+			if (dir_idx < 0) {
+				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
+				continue;
+			}
+
+			new_count++;
+
+			/* Add this directory to the queue for further processing */
+			if (!queue_enqueue(&queue, subdirs[i])) {
+				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+				dircache_free(subdirs, subdir_count);
+				free(current_path);
+				queue_free(&queue);
+				return new_count;
+			}
+		}
+
+		/* Free subdirectory list */
+		dircache_free(subdirs, subdir_count);
 		free(current_path);
 	}
 
@@ -568,22 +574,25 @@ bool monitor_tree(const char *dir_path, int section_id) {
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
-		if (subdirs) {
-			/* Add all subdirectories to queue */
-			for (int i = 0; i < subdir_count; i++) {
-				if (!queue_enqueue(&queue, subdirs[i])) {
-					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-					dircache_free(subdirs, subdir_count);
-					free(current_path);
-					queue_free(&queue);
-					return false;
-				}
-			}
-			/* Free subdirectory list */
-			dircache_free(subdirs, subdir_count);
-		} else {
+		if (!subdirs) {
 			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
+			free(current_path);
+			continue;
 		}
+
+		/* Add all subdirectories to queue */
+		for (int i = 0; i < subdir_count; i++) {
+			if (!queue_enqueue(&queue, subdirs[i])) {
+				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+				dircache_free(subdirs, subdir_count);
+				free(current_path);
+				queue_free(&queue);
+				return false;
+			}
+		}
+
+		/* Free subdirectory list */
+		dircache_free(subdirs, subdir_count);
 		free(current_path);
 	}
 

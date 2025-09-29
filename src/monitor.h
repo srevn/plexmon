@@ -12,7 +12,7 @@
 #define USER_EVENT_RELOAD 2                /* User event identifier for reload signal */
 
 /* Global variables */
-extern uintptr_t g_user_event_ident;       /* Global user event identifier for kqueue */
+extern uintptr_t user_event;               /* Global user event identifier for kqueue */
 extern volatile sig_atomic_t g_running;    /* Global running flag for signal safety */
 
 /* Structure to hold a monitored directory */

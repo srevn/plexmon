@@ -36,22 +36,24 @@ void dircache_cleanup(void) {
 
 	khint_t k;
 	for (k = kh_begin(cache_hash); k != kh_end(cache_hash); ++k) {
-		if (kh_exist(cache_hash, k)) {
-			const char *path_key = kh_key(cache_hash, k);
-			cached_dir_t *dir = kh_value(cache_hash, k);
-
-			if (dir && dir->subdirs) {
-				khint_t sub_k;
-				for (sub_k = kh_begin(dir->subdirs); sub_k != kh_end(dir->subdirs); ++sub_k) {
-					if (kh_exist(dir->subdirs, sub_k)) {
-						free((void *) kh_key(dir->subdirs, sub_k));
-					}
-				}
-				kh_destroy(str_set, dir->subdirs);
-			}
-			free(dir);
-			free((void *) path_key);
+		if (!kh_exist(cache_hash, k)) {
+			continue;
 		}
+
+		const char *path_key = kh_key(cache_hash, k);
+		cached_dir_t *dir = kh_value(cache_hash, k);
+
+		if (dir && dir->subdirs) {
+			khint_t sub_k;
+			for (sub_k = kh_begin(dir->subdirs); sub_k != kh_end(dir->subdirs); ++sub_k) {
+				if (kh_exist(dir->subdirs, sub_k)) {
+					free((void *) kh_key(dir->subdirs, sub_k));
+				}
+			}
+			kh_destroy(str_set, dir->subdirs);
+		}
+		free(dir);
+		free((void *) path_key);
 	}
 
 	kh_destroy(dir_cache, cache_hash);
@@ -98,14 +100,18 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		}
 
 		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-		if (is_directory(full_path, entry->d_type)) {
-			disk_count++;
-			if (!*changed && dir->validated && dir->subdirs) {
-				khint_t k = kh_get(str_set, dir->subdirs, full_path);
-				if (k == kh_end(dir->subdirs)) {
-					*changed = true; /* Found a new directory */
-				}
-			}
+		if (!is_directory(full_path, entry->d_type)) {
+			continue;
+		}
+
+		disk_count++;
+		if (*changed || !dir->validated || !dir->subdirs) {
+			continue;
+		}
+
+		khint_t k = kh_get(str_set, dir->subdirs, full_path);
+		if (k == kh_end(dir->subdirs)) {
+			*changed = true; /* Found a new directory */
 		}
 	}
 
@@ -134,18 +140,21 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			}
 
 			snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-			if (is_directory(full_path, entry->d_type)) {
-				char *key = strdup(full_path);
-				if (!key) {
-					log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
-					continue;
-				}
-				int ret;
-				kh_put(str_set, new_subdirs, key, &ret);
-				if (ret == -1) {
-					log_message(LOG_WARNING, "Failed to insert key into new hash set");
-					free(key);
-				}
+			if (!is_directory(full_path, entry->d_type)) {
+				continue;
+			}
+
+			char *key = strdup(full_path);
+			if (!key) {
+				log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
+				continue;
+			}
+
+			int ret;
+			kh_put(str_set, new_subdirs, key, &ret);
+			if (ret == -1) {
+				log_message(LOG_WARNING, "Failed to insert key into new hash set");
+				free(key);
 			}
 		}
 
@@ -275,20 +284,22 @@ char **dircache_subdirs(const char *path, int *count) {
 	int i = 0;
 	khint_t k;
 	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
-		if (kh_exist(dir->subdirs, k)) {
-			subdirs_array[i] = strdup(kh_key(dir->subdirs, k));
-			if (!subdirs_array[i]) {
-				/* Clean up on failure */
-				for (int j = 0; j < i; j++) {
-					free(subdirs_array[j]);
-				}
-				free(subdirs_array);
-				log_message(LOG_ERR, "Failed to allocate memory for subdirectory path");
-				*count = 0;
-				return NULL;
-			}
-			i++;
+		if (!kh_exist(dir->subdirs, k)) {
+			continue;
 		}
+
+		subdirs_array[i] = strdup(kh_key(dir->subdirs, k));
+		if (!subdirs_array[i]) {
+			/* Clean up on failure */
+			for (int j = 0; j < i; j++) {
+				free(subdirs_array[j]);
+			}
+			free(subdirs_array);
+			log_message(LOG_ERR, "Failed to allocate memory for subdirectory path");
+			*count = 0;
+			return NULL;
+		}
+		i++;
 	}
 
 	return subdirs_array;

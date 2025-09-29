@@ -136,73 +136,54 @@ void events_handle(const char *path, int section_id) {
 		/* Already scheduled, extend the delay to coalesce with new event */
 		pending[idx].scheduled_time = now + debounce_delay;
 		log_message(LOG_DEBUG, "Rescheduled scan for %s to coalesce with new event", path);
-	} else {
-		/* Check if this path is a parent of any pending scans */
-		int child_indices[256];
-		int num_children = 0;
-		const int max_children = sizeof(child_indices) / sizeof(child_indices[0]);
+		return;
+	}
 
-		pending_child(path, child_indices, &num_children, max_children);
+	/* Check if this path is a parent of any pending scans */
+	int child_indices[256];
+	int num_children = 0;
+	const int max_children = sizeof(child_indices) / sizeof(child_indices[0]);
 
-		if (num_children > 0) {
-			/* This is a parent directory of one or more pending scans */
-			log_message(LOG_DEBUG, "Path %s is parent of %d pending scans, consolidating", path, num_children);
+	pending_child(path, child_indices, &num_children, max_children);
 
-			/* Ensure capacity for the new parent scan */
-			if (num_pending >= pending_capacity) {
-				int new_capacity = pending_capacity > 0 ? pending_capacity * 2 : 128;
-				pending_t *new_pending = realloc(pending, new_capacity * sizeof(pending_t));
-				if (!new_pending) {
-					log_message(LOG_ERR, "Failed to reallocate pending scans, cannot consolidate for %s", path);
-					return; /* Cannot schedule, so just return. */
-				}
-				pending = new_pending;
-				pending_capacity = new_capacity;
-				log_message(LOG_DEBUG, "Expanded pending scans capacity to %d", new_capacity);
-			}
-			idx = num_pending++;
-
-			/* Set up the parent scan */
-			strncpy(pending[idx].path, path, PATH_MAX_LEN - 1);
-			pending[idx].path[PATH_MAX_LEN - 1] = '\0';
-			pending[idx].section_id = section_id;
-			pending[idx].first_event_time = now;
-			pending[idx].scheduled_time = now + debounce_delay;
-			pending[idx].is_pending = true;
-
-			/* Mark child scans as not pending */
-			for (int i = 0; i < num_children; i++) {
-				pending[child_indices[i]].is_pending = false;
-				log_message(LOG_DEBUG, "Removed child scan %s in favor of parent %s",
-							pending[child_indices[i]].path, path);
-			}
-
-			log_message(LOG_DEBUG, "Scheduled new parent scan for %s (replaced %d child scans)",
-						path, num_children);
-		} else {
-			/* New pending scan with no related existing scans */
-			if (num_pending >= pending_capacity) {
-				int new_capacity = pending_capacity > 0 ? pending_capacity * 2 : 128;
-				pending_t *new_pending = realloc(pending, new_capacity * sizeof(pending_t));
-				if (!new_pending) {
-					log_message(LOG_ERR, "Failed to reallocate pending scans, cannot schedule new scan for %s", path);
-					return; /* Cannot schedule, so just return. */
-				}
-				pending = new_pending;
-				pending_capacity = new_capacity;
-				log_message(LOG_DEBUG, "Expanded pending scans capacity to %d", new_capacity);
-			}
-			idx = num_pending++;
-
-			strncpy(pending[idx].path, path, PATH_MAX_LEN - 1);
-			pending[idx].path[PATH_MAX_LEN - 1] = '\0';
-			pending[idx].section_id = section_id;
-			pending[idx].first_event_time = now;
-			pending[idx].scheduled_time = now + debounce_delay;
-			pending[idx].is_pending = true;
-
-			log_message(LOG_DEBUG, "Scheduled new scan for %s", path);
+	/* Ensure capacity for the new scan (both cases add exactly 1 scan) */
+	if (num_pending >= pending_capacity) {
+		int new_capacity = pending_capacity > 0 ? pending_capacity * 2 : 128;
+		pending_t *new_pending = realloc(pending, new_capacity * sizeof(pending_t));
+		if (!new_pending) {
+			log_message(LOG_ERR, "Failed to reallocate pending scans, cannot schedule scan for %s", path);
+			return;
 		}
+		pending = new_pending;
+		pending_capacity = new_capacity;
+		log_message(LOG_DEBUG, "Expanded pending scans capacity to %d", new_capacity);
+	}
+
+	/* Set up the new scan with common properties */
+	idx = num_pending++;
+	strncpy(pending[idx].path, path, PATH_MAX_LEN - 1);
+	pending[idx].path[PATH_MAX_LEN - 1] = '\0';
+	pending[idx].section_id = section_id;
+	pending[idx].first_event_time = now;
+	pending[idx].scheduled_time = now + debounce_delay;
+	pending[idx].is_pending = true;
+
+	if (num_children > 0) {
+		/* This is a parent directory consolidating child scans */
+		log_message(LOG_DEBUG, "Path %s is parent of %d pending scans, consolidating", path, num_children);
+
+		/* Mark child scans as not pending */
+		for (int i = 0; i < num_children; i++) {
+			pending[child_indices[i]].is_pending = false;
+			log_message(LOG_DEBUG, "Removed child scan %s in favor of parent %s",
+						pending[child_indices[i]].path, path);
+		}
+
+		log_message(LOG_DEBUG, "Scheduled new parent scan for %s (replaced %d child scans)",
+					path, num_children);
+	} else {
+		/* New independent scan with no related existing scans */
+		log_message(LOG_DEBUG, "Scheduled new scan for %s", path);
 	}
 }
 
