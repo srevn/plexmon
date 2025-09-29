@@ -23,7 +23,7 @@ void queue_free(queue_t *queue);
 
 /* Queue operations */
 bool queue_enqueue(queue_t *queue, const char *path);
-char *queue_dequeue(queue_t *queue);
+node_t *queue_dequeue(queue_t *queue);
 bool queue_empty(queue_t *queue);
 
 #endif /* QUEUE_H */

@@ -34,22 +34,19 @@ bool queue_enqueue(queue_t *queue, const char *path) {
 }
 
 /* Remove an item from the queue (dequeue) */
-char *queue_dequeue(queue_t *queue) {
+node_t *queue_dequeue(queue_t *queue) {
 	if (queue->front == NULL) {
 		return NULL;
 	}
 
 	node_t *temp = queue->front;
-	char *path = strdup(temp->path);
-
 	queue->front = queue->front->next;
 
 	if (queue->front == NULL) {
 		queue->rear = NULL;
 	}
 
-	free(temp);
-	return path;
+	return temp;
 }
 
 /* Free all nodes in the queue */

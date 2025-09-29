@@ -478,7 +478,7 @@ bool monitor_loop(void) {
 /* Detect and register new subdirectories */
 int monitor_scan(const char *dir_path, int section_id) {
 	queue_t queue;
-	char *current_path;
+	node_t *node;
 	int new_count = 0;
 
 	/* Initialize queue */
@@ -491,13 +491,15 @@ int monitor_scan(const char *dir_path, int section_id) {
 	}
 
 	/* Process directories from the queue */
-	while ((current_path = queue_dequeue(&queue))) {
+	while ((node = queue_dequeue(&queue))) {
+		char *current_path = node->path;
+
 		/* Get subdirectories */
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (!subdirs) {
-			free(current_path);
+			free(node);
 			continue;
 		}
 
@@ -515,7 +517,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 			if (!queue_enqueue(&queue, subdirs[i])) {
 				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
 				dircache_free(subdirs, subdir_count);
-				free(current_path);
+				free(node);
 				queue_free(&queue);
 				return new_count;
 			}
@@ -523,7 +525,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 
 		/* Free subdirectory list */
 		dircache_free(subdirs, subdir_count);
-		free(current_path);
+		free(node);
 	}
 
 	/* Clean up queue */
@@ -540,7 +542,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 /* Recursively add a directory and its subdirectories to the watch list */
 bool monitor_tree(const char *dir_path, int section_id) {
 	queue_t queue;
-	char *current_path;
+	node_t *node;
 
 	/* Initialize queue */
 	queue_init(&queue);
@@ -554,19 +556,21 @@ bool monitor_tree(const char *dir_path, int section_id) {
 	log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
 
 	/* Process directories from the queue */
-	while ((current_path = queue_dequeue(&queue))) {
+	while ((node = queue_dequeue(&queue))) {
+		char *current_path = node->path;
+
 		/* Refresh directory cache first to populate it */
 		bool dir_changed;
 		if (!dircache_refresh(current_path, &dir_changed)) {
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
-			free(current_path);
+			free(node);
 			continue;
 		}
 
 		/* Add current directory to monitoring */
 		if (monitor_add(current_path, section_id) < 0) {
 			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-			free(current_path);
+			free(node);
 			continue;
 		}
 
@@ -576,7 +580,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		if (!subdirs) {
 			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
-			free(current_path);
+			free(node);
 			continue;
 		}
 
@@ -585,7 +589,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 			if (!queue_enqueue(&queue, subdirs[i])) {
 				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
 				dircache_free(subdirs, subdir_count);
-				free(current_path);
+				free(node);
 				queue_free(&queue);
 				return false;
 			}
@@ -593,7 +597,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		/* Free subdirectory list */
 		dircache_free(subdirs, subdir_count);
-		free(current_path);
+		free(node);
 	}
 
 	/* Clean up queue */
