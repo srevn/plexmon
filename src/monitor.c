@@ -264,9 +264,20 @@ static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 
 /* Add a directory to the monitoring list */
 int monitor_add(const char *path, int section_id) {
-	if (monitor_validate(path)) {
-		log_message(LOG_DEBUG, "Directory %s is already being monitored and is valid", path);
-		return path_monitored(path);
+	/* Check if already monitored with a single hash lookup */
+	int existing_idx = path_monitored(path);
+	if (existing_idx >= 0) {
+		/* Verify the directory is still valid */
+		monitored_dir_t *dir = &monitored_dirs[existing_idx];
+		struct stat path_stat;
+		if (dir->fd >= 0 && stat(path, &path_stat) == 0 &&
+			path_stat.st_dev == dir->device && path_stat.st_ino == dir->inode) {
+			log_message(LOG_DEBUG, "Directory %s is already being monitored and is valid", path);
+			return existing_idx;
+		}
+		/* Directory was deleted/recreated or fd is invalid, remove from monitoring */
+		log_message(LOG_DEBUG, "Directory %s is no longer valid, removing before re-adding", path);
+		monitor_remove(existing_idx);
 	}
 
 	/* If no free slots, resize the array */
@@ -386,9 +397,7 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 
 			if (subdirs) {
 				for (int i = 0; i < subdir_count; i++) {
-					if (path_monitored(subdirs[i]) == -1) {
-						monitor_add(subdirs[i], md->section_id);
-					}
+					monitor_add(subdirs[i], md->section_id);
 				}
 				dircache_free(subdirs);
 			}
@@ -416,14 +425,20 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 
 /* Process events from kqueue */
 void monitor_process(void) {
-	struct kevent events[INITIAL_MONITOR_CAPACITY];
 	struct timespec timeout;
 	int nev;
+
+	/* Scale event buffer to actual need with reasonable bounds */
+	int event_capacity = active_count;
+	if (event_capacity < 16) event_capacity = 16;	/* Minimum for efficiency */
+	if (event_capacity > 256) event_capacity = 256; /* Cap to prevent excessive stack usage */
+
+	struct kevent events[event_capacity];
 
 	calculate_timeout(events_schedule(), &timeout);
 
 	/* Indefinite wait if no scans and no events */
-	nev = kevent(kqueue_fd, NULL, 0, events, INITIAL_MONITOR_CAPACITY,
+	nev = kevent(kqueue_fd, NULL, 0, events, event_capacity,
 				 (timeout.tv_sec == 0 && timeout.tv_nsec == 0) ? NULL : &timeout);
 
 	if (nev == -1) {
@@ -521,11 +536,13 @@ int monitor_scan(const char *dir_path, int section_id) {
 		}
 
 		/* Add the current directory to monitoring if it's not already */
+		int existing_idx = path_monitored(current_path);
 		int dir_idx = monitor_add(current_path, section_id);
 		if (dir_idx < 0) {
 			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
 			/* We can continue, as subdirectories might still be processable */
-		} else {
+		} else if (existing_idx < 0) {
+			/* Only count if it was newly added (not already monitored) */
 			new_count++;
 		}
 

@@ -87,8 +87,16 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	khash_t(str_set) *unseen_keys = NULL;
 	khint_t k;
 	bool success = true;
+	time_t start_mtime, end_mtime;
 
 	*changed = false;
+
+	/* Capture mtime before scanning to avoid race condition */
+	start_mtime = dircache_mtime(path);
+	if (start_mtime == 0) {
+		log_message(LOG_ERR, "Failed to get mtime for %s", path);
+		return false;
+	}
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
@@ -193,8 +201,17 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		kh_destroy(str_set, unseen_keys);
 	}
 
+	/* Check if directory was modified during scan */
+	end_mtime = dircache_mtime(path);
+	if (end_mtime != start_mtime) {
+		log_message(LOG_DEBUG, "Directory %s modified during scan (mtime %ld -> %ld), using start mtime",
+					path, start_mtime, end_mtime);
+		*changed = true;
+	}
+
 	dir->validated = true;
-	dir->mtime = dircache_mtime(path);
+	/* Use start_mtime to ensure next refresh catches any changes that occurred during this scan */
+	dir->mtime = start_mtime;
 	return success;
 }
 
