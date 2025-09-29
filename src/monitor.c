@@ -513,7 +513,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 
 		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
-		char **subdirs = dircache_subdirs(current_path, &subdir_count);
+		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (!subdirs) {
 			free(node);
@@ -524,7 +524,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 		for (int i = 0; i < subdir_count; i++) {
 			if (!queue_enqueue(&queue, subdirs[i])) {
 				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-				dircache_free(subdirs, subdir_count);
+				dircache_free(subdirs);
 				free(node);
 				queue_free(&queue);
 				return new_count;
@@ -532,7 +532,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 		}
 
 		/* Free subdirectory list */
-		dircache_free(subdirs, subdir_count);
+		dircache_free(subdirs);
 		free(node);
 	}
 
@@ -584,7 +584,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
-		char **subdirs = dircache_subdirs(current_path, &subdir_count);
+		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (!subdirs) {
 			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
@@ -596,7 +596,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 		for (int i = 0; i < subdir_count; i++) {
 			if (!queue_enqueue(&queue, subdirs[i])) {
 				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-				dircache_free(subdirs, subdir_count);
+				dircache_free(subdirs);
 				free(node);
 				queue_free(&queue);
 				return false;
@@ -604,7 +604,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 		}
 
 		/* Free subdirectory list */
-		dircache_free(subdirs, subdir_count);
+		dircache_free(subdirs);
 		free(node);
 	}
 

@@ -22,7 +22,7 @@ void dircache_cleanup(void);
 
 /* Directory cache operations */
 bool dircache_refresh(const char *path, bool *changed);
-char **dircache_subdirs(const char *path, int *count);
-void dircache_free(char **subdirs, int count);
+const char **dircache_subdirs(const char *path, int *count);
+void dircache_free(const char **subdirs);
 
 #endif /* DIRCACHE_H */

@@ -84,22 +84,52 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	DIR *dirp;
 	struct dirent *entry;
 	char full_path[PATH_MAX_LEN];
+	khash_t(str_set) *unseen_keys = NULL;
+	khint_t k;
+	bool success = true;
+
+	*changed = false;
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
-		*changed = false;
 		return false;
 	}
 
-	/* Create a new hash set for the subdirectories found on disk */
-	khash_t(str_set) *new_subdirs = kh_init(str_set);
-	if (!new_subdirs) {
-		log_message(LOG_ERR, "Failed to create temporary hash set for sync: %s", strerror(errno));
-		closedir(dirp);
-		return false;
+	/* If the cache was previously validated, create a temporary copy of its keys */
+	if (dir->validated && dir->subdirs) {
+		unseen_keys = kh_init(str_set);
+		if (!unseen_keys) {
+			log_message(LOG_ERR, "Failed to create temporary hash set for sync");
+			closedir(dirp);
+			return false;
+		}
+		for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
+			if (kh_exist(dir->subdirs, k)) {
+				int ret;
+				/* We only store the pointer, no new memory is allocated for the key itself */
+				kh_put(str_set, unseen_keys, kh_key(dir->subdirs, k), &ret);
+				if (ret == -1) {
+					log_message(LOG_ERR, "Failed to insert key into temporary hash set");
+					kh_destroy(str_set, unseen_keys);
+					closedir(dirp);
+					return false;
+				}
+			}
+		}
 	}
 
-	/* Scan disk and populate the new hash set */
+	/* Ensure the primary subdirs hash set exists */
+	if (!dir->subdirs) {
+		dir->subdirs = kh_init(str_set);
+		if (!dir->subdirs) {
+			log_message(LOG_ERR, "Failed to create subdirectory hash set");
+			if (unseen_keys) kh_destroy(str_set, unseen_keys);
+			closedir(dirp);
+			return false;
+		}
+	}
+
+	/* Scan the directory on disk */
 	while ((entry = readdir(dirp))) {
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
@@ -107,74 +137,65 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 
 		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
 		if (is_directory(full_path, entry->d_type)) {
-			char *key = strdup(full_path);
-			if (!key) {
-				log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
-				continue;
-			}
-			int ret;
-			kh_put(str_set, new_subdirs, key, &ret);
-			if (ret == -1) {
-				log_message(LOG_WARNING, "Failed to insert key into temporary hash set");
-				free(key);
+			/* Check if the directory is already in our cache */
+			k = kh_get(str_set, dir->subdirs, full_path);
+			if (k == kh_end(dir->subdirs)) {
+				/* It's a new directory. Add it to the cache */
+				char *key = strdup(full_path);
+				if (!key) {
+					log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
+					success = false;
+					continue;
+				}
+				int ret;
+				kh_put(str_set, dir->subdirs, key, &ret);
+				if (ret == -1) {
+					log_message(LOG_WARNING, "Failed to insert key into hash set");
+					free(key);
+					success = false;
+				} else {
+					*changed = true;
+				}
+			} else if (unseen_keys) {
+				/* It's an existing directory, remove it from the unseen set */
+				khint_t unseen_k = kh_get(str_set, unseen_keys, full_path);
+				if (unseen_k != kh_end(unseen_keys)) {
+					kh_del(str_set, unseen_keys, unseen_k);
+				}
 			}
 		}
 	}
 	closedir(dirp);
 
-	/* Check for changes between the old cache and the new state from disk */
-	*changed = false;
-	if (!dir->validated || !dir->subdirs || kh_size(dir->subdirs) != kh_size(new_subdirs)) {
+	/* Any keys left in unseen_keys were deleted from disk */
+	if (unseen_keys && kh_size(unseen_keys) > 0) {
 		*changed = true;
-	} else {
-		/* If counts match, check if all new keys exist in the old cache */
-		khint_t k;
-		for (k = kh_begin(new_subdirs); k != kh_end(new_subdirs); ++k) {
-			if (kh_exist(new_subdirs, k)) {
-				const char *key = kh_key(new_subdirs, k);
-				khint_t old_k = kh_get(str_set, dir->subdirs, key);
-				if (old_k == kh_end(dir->subdirs)) {
-					*changed = true;
-					break;
+		log_message(LOG_DEBUG, "Detected %d deleted subdirectories in %s", kh_size(unseen_keys), path);
+		for (k = kh_begin(unseen_keys); k != kh_end(unseen_keys); ++k) {
+			if (kh_exist(unseen_keys, k)) {
+				const char *key_to_del = kh_key(unseen_keys, k);
+				khint_t main_k = kh_get(str_set, dir->subdirs, key_to_del);
+				if (main_k != kh_end(dir->subdirs)) {
+					free((void *) kh_key(dir->subdirs, main_k));
+					kh_del(str_set, dir->subdirs, main_k);
 				}
 			}
 		}
 	}
 
-	/* If changed, replace the old cache with the new state */
 	if (*changed) {
-		log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
-
-		/* Free old cache contents if they existed */
-		if (dir->validated && dir->subdirs) {
-			khint_t k;
-			for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
-				if (kh_exist(dir->subdirs, k)) {
-					free((void *) kh_key(dir->subdirs, k));
-				}
-			}
-			kh_destroy(str_set, dir->subdirs);
-		}
-
-		/* Promote the new state to be the current cache state */
-		dir->subdirs = new_subdirs;
-
+		log_message(LOG_DEBUG, "Directory structure in %s has changed, cache updated", path);
 	} else {
 		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
+	}
 
-		/* Discard the new state structures as they are not needed */
-		khint_t k;
-		for (k = kh_begin(new_subdirs); k != kh_end(new_subdirs); ++k) {
-			if (kh_exist(new_subdirs, k)) {
-				free((void *) kh_key(new_subdirs, k));
-			}
-		}
-		kh_destroy(str_set, new_subdirs);
+	if (unseen_keys) {
+		kh_destroy(str_set, unseen_keys);
 	}
 
 	dir->validated = true;
 	dir->mtime = dircache_mtime(path);
-	return true;
+	return success;
 }
 
 /* Check if directory has changed and update cache if needed */
@@ -249,9 +270,9 @@ bool dircache_refresh(const char *path, bool *changed) {
 }
 
 /* Get subdirectories from cache */
-char **dircache_subdirs(const char *path, int *count) {
+const char **dircache_subdirs(const char *path, int *count) {
 	cached_dir_t *dir;
-	char **subdirs_array;
+	const char **subdirs_array;
 
 	*count = 0;
 
@@ -275,38 +296,21 @@ char **dircache_subdirs(const char *path, int *count) {
 		return NULL;
 	}
 
-	/* Fill array with subdirectory paths */
+	/* Fill array with pointers to subdirectory paths */
 	int i = 0;
 	khint_t k;
 	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
 		if (!kh_exist(dir->subdirs, k)) {
 			continue;
 		}
-
-		subdirs_array[i] = strdup(kh_key(dir->subdirs, k));
-		if (!subdirs_array[i]) {
-			/* Clean up on failure */
-			for (int j = 0; j < i; j++) {
-				free(subdirs_array[j]);
-			}
-			free(subdirs_array);
-			log_message(LOG_ERR, "Failed to allocate memory for subdirectory path");
-			*count = 0;
-			return NULL;
-		}
-		i++;
+		subdirs_array[i++] = kh_key(dir->subdirs, k);
 	}
 
 	return subdirs_array;
 }
 
 /* Free subdirectory list */
-void dircache_free(char **subdirs, int count) {
+void dircache_free(const char **subdirs) {
 	if (!subdirs) return;
-
-	for (int i = 0; i < count; i++) {
-		free(subdirs[i]);
-	}
-
 	free(subdirs);
 }
