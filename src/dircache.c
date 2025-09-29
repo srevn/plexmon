@@ -84,7 +84,6 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	DIR *dirp;
 	struct dirent *entry;
 	char full_path[PATH_MAX_LEN];
-	khint_t disk_count = 0;
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
@@ -92,71 +91,59 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		return false;
 	}
 
-	/* Check for any new subdirectories not present in the cache */
-	*changed = false;
+	/* Create a new hash set for the subdirectories found on disk */
+	khash_t(str_set) *new_subdirs = kh_init(str_set);
+	if (!new_subdirs) {
+		log_message(LOG_ERR, "Failed to create temporary hash set for sync: %s", strerror(errno));
+		closedir(dirp);
+		return false;
+	}
+
+	/* Scan disk and populate the new hash set */
 	while ((entry = readdir(dirp))) {
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
 			continue;
 		}
 
 		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-		if (!is_directory(full_path, entry->d_type)) {
-			continue;
-		}
-
-		disk_count++;
-		if (*changed || !dir->validated || !dir->subdirs) {
-			continue;
-		}
-
-		khint_t k = kh_get(str_set, dir->subdirs, full_path);
-		if (k == kh_end(dir->subdirs)) {
-			*changed = true; /* Found a new directory */
-		}
-	}
-
-	/* Detect changes by comparing counts or if the cache is invalid */
-	if (!dir->validated || !dir->subdirs || kh_size(dir->subdirs) != disk_count) {
-		*changed = true;
-	}
-
-	/* If changed, rebuild the cache. Otherwise, do nothing. */
-	if (*changed) {
-		log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
-
-		/* Create a new hash set for the subdirectories found on disk */
-		khash_t(str_set) *new_subdirs = kh_init(str_set);
-		if (!new_subdirs) {
-			log_message(LOG_ERR, "Failed to create hash set for sync: %s", strerror(errno));
-			closedir(dirp);
-			return false;
-		}
-
-		/* Rewind and populate the new hash set */
-		rewinddir(dirp);
-		while ((entry = readdir(dirp))) {
-			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-				continue;
-			}
-
-			snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
-			if (!is_directory(full_path, entry->d_type)) {
-				continue;
-			}
-
+		if (is_directory(full_path, entry->d_type)) {
 			char *key = strdup(full_path);
 			if (!key) {
 				log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
 				continue;
 			}
-
 			int ret;
 			kh_put(str_set, new_subdirs, key, &ret);
 			if (ret == -1) {
-				log_message(LOG_WARNING, "Failed to insert key into new hash set");
+				log_message(LOG_WARNING, "Failed to insert key into temporary hash set");
 				free(key);
 			}
 		}
+	}
+	closedir(dirp);
+
+	/* Check for changes between the old cache and the new state from disk */
+	*changed = false;
+	if (!dir->validated || !dir->subdirs || kh_size(dir->subdirs) != kh_size(new_subdirs)) {
+		*changed = true;
+	} else {
+		/* If counts match, check if all new keys exist in the old cache */
+		khint_t k;
+		for (k = kh_begin(new_subdirs); k != kh_end(new_subdirs); ++k) {
+			if (kh_exist(new_subdirs, k)) {
+				const char *key = kh_key(new_subdirs, k);
+				khint_t old_k = kh_get(str_set, dir->subdirs, key);
+				if (old_k == kh_end(dir->subdirs)) {
+					*changed = true;
+					break;
+				}
+			}
+		}
+	}
+
+	/* If changed, replace the old cache with the new state */
+	if (*changed) {
+		log_message(LOG_DEBUG, "Directory structure in %s has changed, updating cache", path);
 
 		/* Free old cache contents if they existed */
 		if (dir->validated && dir->subdirs) {
@@ -174,9 +161,17 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 
 	} else {
 		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
+
+		/* Discard the new state structures as they are not needed */
+		khint_t k;
+		for (k = kh_begin(new_subdirs); k != kh_end(new_subdirs); ++k) {
+			if (kh_exist(new_subdirs, k)) {
+				free((void *) kh_key(new_subdirs, k));
+			}
+		}
+		kh_destroy(str_set, new_subdirs);
 	}
 
-	closedir(dirp);
 	dir->validated = true;
 	dir->mtime = dircache_mtime(path);
 	return true;
