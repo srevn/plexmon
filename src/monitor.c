@@ -477,7 +477,7 @@ bool monitor_loop(void) {
 /* Detect and register new subdirectories */
 int monitor_scan(const char *dir_path, int section_id) {
 	queue_t queue;
-	char current_path[PATH_MAX_LEN];
+	char *current_path;
 	int new_count = 0;
 
 	/* Initialize queue */
@@ -490,40 +490,34 @@ int monitor_scan(const char *dir_path, int section_id) {
 	}
 
 	/* Process directories from the queue */
-	while (!queue_empty(&queue)) {
-		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
-			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
-			break;
-		}
-
+	while ((current_path = queue_dequeue(&queue))) {
 		/* Get subdirectories */
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
-		if (!subdirs) {
-			continue; /* No subdirectories or error */
-		}
+		if (subdirs) {
+			/* Check each subdirectory */
+			for (int i = 0; i < subdir_count; i++) {
+				int dir_idx = monitor_add(subdirs[i], section_id);
+				if (dir_idx >= 0) {
+					new_count++;
 
-		/* Check each subdirectory */
-		for (int i = 0; i < subdir_count; i++) {
-			int dir_idx = monitor_add(subdirs[i], section_id);
-			if (dir_idx >= 0) {
-				new_count++;
-
-				/* Add this directory to the queue for further processing */
-				if (!queue_enqueue(&queue, subdirs[i])) {
-					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-					dircache_free(subdirs, subdir_count);
-					queue_free(&queue);
-					return new_count;
+					/* Add this directory to the queue for further processing */
+					if (!queue_enqueue(&queue, subdirs[i])) {
+						log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+						dircache_free(subdirs, subdir_count);
+						free(current_path);
+						queue_free(&queue);
+						return new_count;
+					}
+				} else {
+					log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
 				}
-			} else {
-				log_message(LOG_WARNING, "Failed to add directory %s to monitoring", subdirs[i]);
 			}
+			/* Free subdirectory list */
+			dircache_free(subdirs, subdir_count);
 		}
-
-		/* Free subdirectory list */
-		dircache_free(subdirs, subdir_count);
+		free(current_path);
 	}
 
 	/* Clean up queue */
@@ -540,7 +534,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 /* Recursively add a directory and its subdirectories to the watch list */
 bool monitor_tree(const char *dir_path, int section_id) {
 	queue_t queue;
-	char current_path[PATH_MAX_LEN];
+	char *current_path;
 
 	/* Initialize queue */
 	queue_init(&queue);
@@ -554,22 +548,19 @@ bool monitor_tree(const char *dir_path, int section_id) {
 	log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
 
 	/* Process directories from the queue */
-	while (!queue_empty(&queue)) {
-		if (!queue_dequeue(&queue, current_path, sizeof(current_path))) {
-			log_message(LOG_ERR, "Failed to dequeue path, buffer too small or queue empty");
-			break;
-		}
-
+	while ((current_path = queue_dequeue(&queue))) {
 		/* Refresh directory cache first to populate it */
 		bool dir_changed;
 		if (!dircache_refresh(current_path, &dir_changed)) {
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
+			free(current_path);
 			continue;
 		}
 
 		/* Add current directory to monitoring */
 		if (monitor_add(current_path, section_id) < 0) {
 			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
+			free(current_path);
 			continue;
 		}
 
@@ -577,23 +568,23 @@ bool monitor_tree(const char *dir_path, int section_id) {
 		int subdir_count = 0;
 		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
-		if (!subdirs) {
-			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
-			continue;
-		}
-
-		/* Add all subdirectories to queue */
-		for (int i = 0; i < subdir_count; i++) {
-			if (!queue_enqueue(&queue, subdirs[i])) {
-				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-				dircache_free(subdirs, subdir_count);
-				queue_free(&queue);
-				return false;
+		if (subdirs) {
+			/* Add all subdirectories to queue */
+			for (int i = 0; i < subdir_count; i++) {
+				if (!queue_enqueue(&queue, subdirs[i])) {
+					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+					dircache_free(subdirs, subdir_count);
+					free(current_path);
+					queue_free(&queue);
+					return false;
+				}
 			}
+			/* Free subdirectory list */
+			dircache_free(subdirs, subdir_count);
+		} else {
+			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
 		}
-
-		/* Free subdirectory list */
-		dircache_free(subdirs, subdir_count);
+		free(current_path);
 	}
 
 	/* Clean up queue */

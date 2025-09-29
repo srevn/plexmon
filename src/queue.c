@@ -34,18 +34,13 @@ bool queue_enqueue(queue_t *queue, const char *path) {
 }
 
 /* Remove an item from the queue (dequeue) */
-bool queue_dequeue(queue_t *queue, char *path, size_t path_len) {
+char *queue_dequeue(queue_t *queue) {
 	if (queue->front == NULL) {
-		return false;
+		return NULL;
 	}
 
 	node_t *temp = queue->front;
-
-	if (strlen(temp->path) >= path_len) {
-		/* Path does not fit in buffer */
-		return false;
-	}
-	strcpy(path, temp->path);
+	char *path = strdup(temp->path);
 
 	queue->front = queue->front->next;
 
@@ -54,7 +49,7 @@ bool queue_dequeue(queue_t *queue, char *path, size_t path_len) {
 	}
 
 	free(temp);
-	return true;
+	return path;
 }
 
 /* Free all nodes in the queue */
