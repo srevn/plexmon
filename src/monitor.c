@@ -384,29 +384,43 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 	}
 
 	bool dir_changed = false;
+	dir_changes_t changes = { 0 };
 
-	/* Directory cache with mtime checking */
-	if (dircache_refresh(md->path, &dir_changed)) {
+	/* Directory cache with mtime checking and change tracking */
+	if (dircache_refresh(md->path, &dir_changed, &changes)) {
 		if (dir_changed) {
-			log_message(LOG_DEBUG, "Structure changed in %s, detecting new entries",
+			log_message(LOG_DEBUG, "Structure changed in %s, processing changes",
 						md->path);
-			/* Only add new entries from cache to the monitor */
-			int subdir_count = 0;
-			const char **subdirs = dircache_subdirs(md->path, &subdir_count);
-			int initial_count = monitor_count();
 
-			if (subdirs) {
-				for (int i = 0; i < subdir_count; i++) {
-					monitor_add(subdirs[i], md->section_id);
+			/* Process removed directories first */
+			if (changes.removed_count > 0) {
+				log_message(LOG_DEBUG, "Removing %d deleted directories from monitoring",
+							changes.removed_count);
+				for (int i = 0; i < changes.removed_count; i++) {
+					int idx = path_monitored(changes.removed[i]);
+					if (idx >= 0) {
+						monitor_remove(idx);
+					}
 				}
-				dircache_free(subdirs);
 			}
 
-			int new_dirs = monitor_count() - initial_count;
-			if (new_dirs > 0) {
-				log_message(LOG_DEBUG, "Registered %d new directories under %s",
-							new_dirs, md->path);
+			/* Process added directories - only monitor the new ones */
+			if (changes.added_count > 0) {
+				log_message(LOG_DEBUG, "Adding %d new directories to monitoring",
+							changes.added_count);
+				int added_count = 0;
+				for (int i = 0; i < changes.added_count; i++) {
+					if (monitor_add(changes.added[i], md->section_id) >= 0) {
+						added_count++;
+					}
+				}
+				if (added_count > 0) {
+					log_message(LOG_DEBUG, "Successfully registered %d new directories under %s",
+								added_count, md->path);
+				}
 			}
+
+			dircache_free_changes(&changes);
 		} else {
 			/* Still queue a Plex scan but skip directory tree rescanning */
 			log_message(LOG_DEBUG, "File change detected in %s, skip directory rescan",
@@ -529,7 +543,7 @@ int monitor_scan(const char *dir_path, int section_id) {
 
 		/* Refresh the cache for the current directory */
 		bool dir_changed;
-		if (!dircache_refresh(current_path, &dir_changed)) {
+		if (!dircache_refresh(current_path, &dir_changed, NULL)) {
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
 			free(node);
 			continue;
@@ -604,7 +618,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		/* Refresh directory cache first to populate it */
 		bool dir_changed;
-		if (!dircache_refresh(current_path, &dir_changed)) {
+		if (!dircache_refresh(current_path, &dir_changed, NULL)) {
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
 			free(node);
 			continue;

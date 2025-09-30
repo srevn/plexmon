@@ -80,7 +80,7 @@ static cached_dir_t *dircache_find(const char *path) {
 }
 
 /* Check if directory structure has changed and updates cache */
-static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
+static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed, dir_changes_t *changes) {
 	DIR *dirp;
 	struct dirent *entry;
 	char full_path[PATH_MAX_LEN];
@@ -88,8 +88,22 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	khint_t k;
 	bool success = true;
 	time_t start_mtime, end_mtime;
+	const char **added_list = NULL;
+	int added_capacity = 0;
+	int added_count = 0;
+	const char **removed_list = NULL;
+	int removed_capacity = 0;
+	int removed_count = 0;
+	int skipped_symlinks = 0;
+	int skipped_unknown = 0;
 
 	*changed = false;
+	if (changes) {
+		changes->added = NULL;
+		changes->added_count = 0;
+		changes->removed = NULL;
+		changes->removed_count = 0;
+	}
 
 	/* Capture mtime before scanning to avoid race condition */
 	start_mtime = dircache_mtime(path);
@@ -143,6 +157,17 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 			continue;
 		}
 
+		/* Performance optimization: Skip symlinks to avoid stat() calls */
+		if (entry->d_type == DT_LNK) {
+			skipped_symlinks++;
+			continue;
+		}
+
+		/* Warn about filesystems that don't provide d_type */
+		if (entry->d_type == DT_UNKNOWN) {
+			skipped_unknown++;
+		}
+
 		snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
 		if (is_directory(full_path, entry->d_type)) {
 			/* Check if the directory is already in our cache */
@@ -163,6 +188,21 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 					success = false;
 				} else {
 					*changed = true;
+					/* Track added directory for caller */
+					if (changes) {
+						if (added_count >= added_capacity) {
+							int new_capacity = added_capacity == 0 ? 16 : added_capacity * 2;
+							const char **new_list = realloc(added_list, new_capacity * sizeof(char *));
+							if (!new_list) {
+								log_message(LOG_WARNING, "Failed to allocate memory for added list");
+								success = false;
+								continue;
+							}
+							added_list = new_list;
+							added_capacity = new_capacity;
+						}
+						added_list[added_count++] = key;
+					}
 				}
 			} else if (unseen_keys) {
 				/* It's an existing directory, remove it from the unseen set */
@@ -179,9 +219,25 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 	if (unseen_keys && kh_size(unseen_keys) > 0) {
 		*changed = true;
 		log_message(LOG_DEBUG, "Detected %d deleted subdirectories in %s", kh_size(unseen_keys), path);
+
+		/* Build removed list if caller wants change tracking */
+		if (changes) {
+			removed_capacity = kh_size(unseen_keys);
+			removed_list = malloc(removed_capacity * sizeof(char *));
+			if (!removed_list) {
+				log_message(LOG_WARNING, "Failed to allocate memory for removed list");
+			}
+		}
+
 		for (k = kh_begin(unseen_keys); k != kh_end(unseen_keys); ++k) {
 			if (kh_exist(unseen_keys, k)) {
 				const char *key_to_del = kh_key(unseen_keys, k);
+
+				/* Track removed directory for caller */
+				if (changes && removed_list && removed_count < removed_capacity) {
+					removed_list[removed_count++] = key_to_del;
+				}
+
 				khint_t main_k = kh_get(str_set, dir->subdirs, key_to_del);
 				if (main_k != kh_end(dir->subdirs)) {
 					free((void *) kh_key(dir->subdirs, main_k));
@@ -195,6 +251,28 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 		log_message(LOG_DEBUG, "Directory structure in %s has changed, cache updated", path);
 	} else {
 		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
+	}
+
+	/* Log performance optimization statistics */
+	if (skipped_symlinks > 0) {
+		log_message(LOG_DEBUG, "Skipped %d symlinks in %s (performance optimization)",
+					skipped_symlinks, path);
+	}
+	if (skipped_unknown > 0) {
+		log_message(LOG_WARNING, "Encountered %d entries with DT_UNKNOWN in %s (filesystem limitation)",
+					skipped_unknown, path);
+	}
+
+	/* Populate changes structure for caller */
+	if (changes) {
+		changes->added = added_list;
+		changes->added_count = added_count;
+		changes->removed = removed_list;
+		changes->removed_count = removed_count;
+	} else {
+		/* If caller doesn't want changes, free our tracking arrays */
+		free(added_list);
+		free(removed_list);
 	}
 
 	if (unseen_keys) {
@@ -216,11 +294,17 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed) {
 }
 
 /* Check if directory has changed and update cache if needed */
-bool dircache_refresh(const char *path, bool *changed) {
+bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes) {
 	cached_dir_t *dir;
 	time_t current_mtime;
 
 	*changed = false;
+	if (changes) {
+		changes->added = NULL;
+		changes->added_count = 0;
+		changes->removed = NULL;
+		changes->removed_count = 0;
+	}
 
 	/* Get current mtime */
 	current_mtime = dircache_mtime(path);
@@ -239,7 +323,7 @@ bool dircache_refresh(const char *path, bool *changed) {
 						path, dir->mtime, current_mtime);
 
 			/* Check and update directory structure in one pass */
-			return dircache_sync(path, dir, changed);
+			return dircache_sync(path, dir, changed, changes);
 		} else {
 			log_message(LOG_DEBUG, "Directory %s unchanged, using cached data", path);
 		}
@@ -275,7 +359,7 @@ bool dircache_refresh(const char *path, bool *changed) {
 		kh_value(cache_hash, k) = dir;
 
 		/* Check and update directory structure */
-		if (!dircache_sync(path, dir, changed)) {
+		if (!dircache_sync(path, dir, changed, changes)) {
 			/* The entry will be cleaned up during dircache_cleanup */
 			return false;
 		}
@@ -330,4 +414,15 @@ const char **dircache_subdirs(const char *path, int *count) {
 void dircache_free(const char **subdirs) {
 	if (!subdirs) return;
 	free(subdirs);
+}
+
+/* Free directory changes structure */
+void dircache_free_changes(dir_changes_t *changes) {
+	if (!changes) return;
+	free(changes->added);
+	free(changes->removed);
+	changes->added = NULL;
+	changes->added_count = 0;
+	changes->removed = NULL;
+	changes->removed_count = 0;
 }
