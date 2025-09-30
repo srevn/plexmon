@@ -550,13 +550,13 @@ int monitor_scan(const char *dir_path, int section_id) {
 		}
 
 		/* Add the current directory to monitoring if it's not already */
-		int existing_idx = path_monitored(current_path);
+		int prev_count = monitor_count();
 		int dir_idx = monitor_add(current_path, section_id);
 		if (dir_idx < 0) {
 			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
 			/* We can continue, as subdirectories might still be processable */
-		} else if (existing_idx < 0) {
-			/* Only count if it was newly added (not already monitored) */
+		} else if (monitor_count() > prev_count) {
+			/* Only count if it was newly added (active_count increased) */
 			new_count++;
 		}
 
