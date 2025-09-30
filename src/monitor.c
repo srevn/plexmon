@@ -420,7 +420,7 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 				}
 			}
 
-			dircache_free_changes(&changes);
+			changes_free(&changes);
 		} else {
 			/* Still queue a Plex scan but skip directory tree rescanning */
 			log_message(LOG_DEBUG, "File change detected in %s, skip directory rescan",

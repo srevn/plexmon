@@ -233,9 +233,15 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed, di
 			if (kh_exist(unseen_keys, k)) {
 				const char *key_to_del = kh_key(unseen_keys, k);
 
-				/* Track removed directory for caller */
+				/* Track removed directory for caller by creating a copy */
 				if (changes && removed_list && removed_count < removed_capacity) {
-					removed_list[removed_count++] = key_to_del;
+					char *key_copy = strdup(key_to_del);
+					if (key_copy) {
+						removed_list[removed_count++] = key_copy;
+					} else {
+						log_message(LOG_WARNING, "Failed to allocate memory for removed list entry");
+						/* Not a fatal error, but the caller won't know about this deletion */
+					}
 				}
 
 				khint_t main_k = kh_get(str_set, dir->subdirs, key_to_del);
@@ -417,12 +423,21 @@ void dircache_free(const char **subdirs) {
 }
 
 /* Free directory changes structure */
-void dircache_free_changes(dir_changes_t *changes) {
+void changes_free(dir_changes_t *changes) {
 	if (!changes) return;
+
+	/* The 'added' list contains pointers to keys */
 	free(changes->added);
-	free(changes->removed);
 	changes->added = NULL;
 	changes->added_count = 0;
+
+	/* The 'removed' list contains heap-allocated copies of keys */
+	if (changes->removed) {
+		for (int i = 0; i < changes->removed_count; i++) {
+			free((void *) changes->removed[i]);
+		}
+		free(changes->removed);
+	}
 	changes->removed = NULL;
 	changes->removed_count = 0;
 }

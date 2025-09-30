@@ -31,6 +31,6 @@ void dircache_cleanup(void);
 bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes);
 const char **dircache_subdirs(const char *path, int *count);
 void dircache_free(const char **subdirs);
-void dircache_free_changes(dir_changes_t *changes);
+void changes_free(dir_changes_t *changes);
 
 #endif /* DIRCACHE_H */
