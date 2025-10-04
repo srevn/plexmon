@@ -19,8 +19,10 @@ typedef struct cached_dir {
 typedef struct dir_changes {
 	const char **added;                /* Array of added subdirectory paths */
 	int added_count;                   /* Number of added subdirectories */
+	int added_capacity;                /* Internal: allocated capacity of `added` */
 	const char **removed;              /* Array of removed subdirectory paths */
 	int removed_count;                 /* Number of removed subdirectories */
+	int removed_capacity;              /* Internal: allocated capacity of `removed` */
 } dir_changes_t;
 
 /* Directory cache lifecycle management */
