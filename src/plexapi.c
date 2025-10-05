@@ -82,7 +82,7 @@ void plexapi_cleanup(void) {
 	curl_global_cleanup();
 }
 
-/* Check connectivity to the Plex Media Server */
+/* Check connectivity and authentication to the Plex Media Server */
 bool plexapi_check(void) {
 	curl_response_t response;
 	char url[1024];
@@ -111,6 +111,7 @@ bool plexapi_check(void) {
 
 	start_time = time(NULL);
 
+	/* Check if Plex server is reachable (retry for delayed start) */
 	do {
 		/* Initialize response struct */
 		response.data = malloc(1);
@@ -131,10 +132,9 @@ bool plexapi_check(void) {
 			curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_code);
 
 			if (http_code >= 200 && http_code < 300) {
-				log_message(LOG_INFO, "Successfully connected to Plex Media Server");
+				/* Server is reachable, break out to validate token */
 				free(response.data);
-				curl_slist_free_all(headers);
-				return true;
+				break;
 			} else {
 				log_message(LOG_DEBUG, "Plex server responded with HTTP %ld",
 							http_code);
@@ -162,9 +162,48 @@ bool plexapi_check(void) {
 
 	} while (1);
 
-	/* This point should never be reached */
+	/* Clean up identity check headers */
 	curl_slist_free_all(headers);
-	return false;
+
+	/* Validate access token with authenticated endpoint */
+	snprintf(url, sizeof(url), "%s/servers", g_config.plex_url);
+	headers = curl_headers();
+
+	response.data = malloc(1);
+	if (!response.data) {
+		curl_slist_free_all(headers);
+		log_message(LOG_ERR, "Memory allocation failed");
+		return false;
+	}
+	response.size = 0;
+
+	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+	curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *) &response);
+
+	res = curl_easy_perform(curl_handle);
+	curl_slist_free_all(headers);
+
+	if (res != CURLE_OK) {
+		log_message(LOG_ERR, "Failed to validate access token: %s",
+					curl_easy_strerror(res));
+		free(response.data);
+		return false;
+	}
+
+	curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &http_code);
+	free(response.data);
+
+	if (http_code == 401) {
+		log_message(LOG_ERR, "Authentication failed: Invalid access token");
+		return false;
+	} else if (http_code < 200 || http_code >= 300) {
+		log_message(LOG_ERR, "Token validation failed with HTTP %ld", http_code);
+		return false;
+	}
+
+	log_message(LOG_INFO, "Successfully connected to Plex Media Server");
+	return true;
 }
 
 /* Process library section */
