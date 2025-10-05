@@ -41,7 +41,4 @@ int monitor_count(void);
 bool monitor_validate(const char *path);
 bool monitor_tree(const char *dir_path, int section_id);
 
-/* Scan operations */
-int monitor_scan(const char *dir_path, int section_id);
-
 #endif /* MONITOR_H */

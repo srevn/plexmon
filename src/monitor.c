@@ -430,7 +430,7 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 		/* Cache check failed, fall back to targeted refresh */
 		log_message(LOG_WARNING, "Failed to check cache for %s, using targeted refresh",
 					md->path);
-		monitor_scan(md->path, md->section_id);
+		monitor_tree(md->path, md->section_id);
 	}
 
 	/* Queue event */
@@ -522,84 +522,12 @@ bool monitor_loop(void) {
 	return true;
 }
 
-/* Detect and register new subdirectories */
-int monitor_scan(const char *dir_path, int section_id) {
-	queue_t queue;
-	node_t *node;
-	int new_count = 0;
-
-	/* Initialize queue */
-	queue_init(&queue);
-
-	/* Start with the initial directory */
-	if (!queue_enqueue(&queue, dir_path)) {
-		log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-		return 0;
-	}
-
-	/* Process directories from the queue */
-	while ((node = queue_dequeue(&queue))) {
-		char *current_path = node->path;
-
-		/* Refresh the cache for the current directory */
-		bool dir_changed;
-		if (!dircache_refresh(current_path, &dir_changed, NULL)) {
-			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
-			free(node);
-			continue;
-		}
-
-		/* Add the current directory to monitoring if it's not already */
-		int prev_count = monitor_count();
-		int dir_idx = monitor_add(current_path, section_id);
-		if (dir_idx < 0) {
-			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-			/* We can continue, as subdirectories might still be processable */
-		} else if (monitor_count() > prev_count) {
-			/* Only count if it was newly added (active_count increased) */
-			new_count++;
-		}
-
-		/* Get subdirectories from the now-warm cache */
-		int subdir_count = 0;
-		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
-
-		if (!subdirs) {
-			free(node);
-			continue;
-		}
-
-		/* Enqueue all found subdirectories for the next iteration */
-		for (int i = 0; i < subdir_count; i++) {
-			if (!queue_enqueue(&queue, subdirs[i])) {
-				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-				dircache_free(subdirs);
-				free(node);
-				queue_free(&queue);
-				return new_count;
-			}
-		}
-
-		/* Free subdirectory list */
-		dircache_free(subdirs);
-		free(node);
-	}
-
-	/* Clean up queue */
-	queue_free(&queue);
-
-	if (new_count > 0) {
-		log_message(LOG_INFO, "Added %d new directories under %s to monitoring",
-					new_count, dir_path);
-	}
-
-	return new_count;
-}
-
-/* Recursively add a directory and its subdirectories to the watch list */
+/* Traverses a directory tree to add all subdirectories to monitoring */
 bool monitor_tree(const char *dir_path, int section_id) {
 	queue_t queue;
 	node_t *node;
+	int new_count = 0;
+	bool is_root = true;
 
 	/* Initialize queue */
 	queue_init(&queue);
@@ -610,55 +538,76 @@ bool monitor_tree(const char *dir_path, int section_id) {
 		return false;
 	}
 
-	log_message(LOG_DEBUG, "Starting directory tree registration from %s", dir_path);
+	log_message(LOG_DEBUG, "Starting directory tree traversal from %s", dir_path);
 
 	/* Process directories from the queue */
 	while ((node = queue_dequeue(&queue))) {
 		char *current_path = node->path;
 
-		/* Refresh directory cache first to populate it */
+		/* Refresh the cache for the current directory */
 		bool dir_changed;
 		if (!dircache_refresh(current_path, &dir_changed, NULL)) {
+			if (is_root) {
+				/* Root directory cache refresh failed */
+				log_message(LOG_ERR, "Failed to refresh cache for root directory %s", dir_path);
+				free(node);
+				queue_free(&queue);
+				return false;
+			}
+			/* Subdirectory, continue */
 			log_message(LOG_WARNING, "Failed to refresh cache for %s", current_path);
 			free(node);
 			continue;
 		}
 
-		/* Add current directory to monitoring */
+		/* Add the current directory to monitoring if it's not already */
+		int prev_count = monitor_count();
 		if (monitor_add(current_path, section_id) < 0) {
+			if (is_root) {
+				/* Root directory failed to add - fatal */
+				log_message(LOG_ERR, "Failed to add root directory %s to monitoring", dir_path);
+				free(node);
+				queue_free(&queue);
+				return false;
+			}
+			/* Subdirectory failed, continue */
 			log_message(LOG_WARNING, "Failed to add directory %s to monitoring", current_path);
-			free(node);
-			continue;
+		} else if (monitor_count() > prev_count) {
+			/* Only count if it was newly added */
+			new_count++;
 		}
 
 		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
 		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
-		if (!subdirs) {
-			log_message(LOG_DEBUG, "No subdirectories found for %s", current_path);
-			free(node);
-			continue;
-		}
-
-		/* Add all subdirectories to queue */
-		for (int i = 0; i < subdir_count; i++) {
-			if (!queue_enqueue(&queue, subdirs[i])) {
-				log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-				dircache_free(subdirs);
-				free(node);
-				queue_free(&queue);
-				return false;
+		if (subdirs) {
+			/* Enqueue all found subdirectories for the next iteration */
+			for (int i = 0; i < subdir_count; i++) {
+				if (!queue_enqueue(&queue, subdirs[i])) {
+					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
+					dircache_free(subdirs);
+					free(node);
+					queue_free(&queue);
+					return false;
+				}
 			}
+			dircache_free(subdirs);
 		}
 
-		/* Free subdirectory list */
-		dircache_free(subdirs);
+		/* After processing the root, all subsequent are subdirectories */
+		is_root = false;
+
 		free(node);
 	}
 
 	/* Clean up queue */
 	queue_free(&queue);
+
+	if (new_count > 0) {
+		log_message(LOG_INFO, "Added %d new directories under %s to monitoring",
+					new_count, dir_path);
+	}
 
 	return true;
 }
