@@ -4,8 +4,7 @@
 #include <stdbool.h>
 #include <time.h>
 
-/* Event processing configuration */
-#define PATH_MAX_LEN 1024              /* Maximum length for filesystem paths */
+#include "config.h"
 
 /* Structure to track pending scan requests */
 typedef struct pending {

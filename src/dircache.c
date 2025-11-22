@@ -49,7 +49,7 @@ void dircache_cleanup(void) {
 					free((void *) kh_key(dir->subdirs, sub_k));
 				}
 			}
-			kh_destroy(str_set, dir->subdirs);
+			kh_destroy(subdir_map, dir->subdirs);
 		}
 		free(dir);
 		free((void *) path_key);
@@ -78,40 +78,11 @@ static cached_dir_t *dircache_find(const char *path) {
 	return kh_value(cache_hash, k);
 }
 
-/* Creates a temporary hash set of all subdirectory keys from a cached directory */
-static khash_t(str_set) * dircache_mark(cached_dir_t *dir) {
-	if (!dir->validated || !dir->subdirs) {
-		return NULL;
-	}
-
-	khash_t(str_set) *unseen = kh_init(str_set);
-	if (!unseen) {
-		log_message(LOG_ERR, "Failed to create temporary hash set for sync");
-		return NULL;
-	}
-
-	khint_t k;
-	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
-		if (kh_exist(dir->subdirs, k)) {
-			int ret;
-			/* We only store the pointer, no new memory is allocated for the key itself */
-			kh_put(str_set, unseen, kh_key(dir->subdirs, k), &ret);
-			if (ret == -1) {
-				log_message(LOG_ERR, "Failed to insert key into temporary hash set");
-				kh_destroy(str_set, unseen);
-				return NULL;
-			}
-		}
-	}
-	return unseen;
-}
-
-/* Scans a directory on disk, identifies new subdirectories, and updates the cache */
-static bool dircache_sweep(const char *path, cached_dir_t *dir, khash_t(str_set) * unseen, dir_changes_t *changes) {
+/* Scans a directory on disk, updates the cache using generational marking */
+static bool dircache_sweep(const char *path, cached_dir_t *dir, dir_changes_t *changes) {
 	DIR *dirp;
 	struct dirent *entry;
 	bool changed = false; /* Tracks if cache structure was modified */
-	bool success = true;  /* Tracks if scan completed without errors */
 
 	/* Dynamic buffer for constructing full paths */
 	char *full_path = NULL;
@@ -150,7 +121,6 @@ static bool dircache_sweep(const char *path, cached_dir_t *dir, khash_t(str_set)
 			char *new_buf = realloc(full_path, required_len);
 			if (!new_buf) {
 				log_message(LOG_WARNING, "Failed to allocate memory for full path buffer");
-				success = false; /* Mark error but continue processing other entries */
 				continue;
 			}
 			full_path = new_buf;
@@ -162,127 +132,115 @@ static bool dircache_sweep(const char *path, cached_dir_t *dir, khash_t(str_set)
 			continue;
 		}
 
-		/* Check if directory already exists in cache (kh_end means not found) */
-		khint_t k = kh_get(str_set, dir->subdirs, full_path);
+		/* Check if directory already exists in cache */
+		khint_t k = kh_get(subdir_map, dir->subdirs, full_path);
 
-		/* Handle existing directory - mark as "seen" by removing from unseen set */
 		if (k != kh_end(dir->subdirs)) {
-			if (unseen) {
-				khint_t unseen_k = kh_get(str_set, unseen, full_path);
-				if (unseen_k != kh_end(unseen)) {
-					kh_del(str_set, unseen, unseen_k);
-				}
-			}
+			/* Exists: update generation */
+			kh_value(dir->subdirs, k) = dir->generation;
 			continue;
+		}
+
+		/* Pre-check changes capacity if we are tracking changes */
+		if (changes) {
+			if (changes->added_count >= changes->added_capacity) {
+				int new_cap = changes->added_capacity == 0 ? 16 : changes->added_capacity * 2;
+				const char **new_list = realloc((void *) changes->added, new_cap * sizeof(char *));
+				if (!new_list) {
+					log_message(LOG_ERR, "Failed to realloc - aborting add of %s", full_path);
+					continue; /* Skip adding this directory to cache to maintain consistency */
+				}
+				changes->added = new_list;
+				changes->added_capacity = new_cap;
+			}
 		}
 
 		/* It's a new directory, add it to the cache */
 		char *key = strdup(full_path);
 		if (!key) {
 			log_message(LOG_WARNING, "Failed to allocate memory for subdirectory key");
-			success = false;
 			continue;
 		}
 
-		/* Insert into hash table. Return values: -1=error, 0=exists, 1=inserted */
+		/* Insert into hash table */
 		int ret;
-		kh_put(str_set, dir->subdirs, key, &ret);
+		k = kh_put(subdir_map, dir->subdirs, key, &ret);
 		if (ret == -1) {
-			log_message(LOG_WARNING, "Failed to insert key into hash set");
+			log_message(LOG_WARNING, "Failed to insert key into hash map");
 			free(key);
-			success = false;
 			continue;
 		}
 
+		/* Set generation and track change */
+		kh_value(dir->subdirs, k) = dir->generation;
 		changed = true;
 
-		if (!changes) {
-			continue;
+		if (changes) {
+			changes->added[changes->added_count++] = key;
 		}
-
-		/* Grow added list using exponential growth */
-		if (changes->added_count >= changes->added_capacity) {
-			int new_cap = changes->added_capacity == 0 ? 16 : changes->added_capacity * 2;
-			const char **new_list = realloc((void *) changes->added, new_cap * sizeof(char *));
-			if (!new_list) {
-				log_message(LOG_WARNING, "Failed to realloc for added list");
-				/* Key is in cache, but not in changes - non-fatal, continue */
-				success = false;
-				continue;
-			}
-			changes->added = new_list;
-			changes->added_capacity = new_cap;
-		}
-		/* Store pointer to key (owned by hash table, not copied) */
-		changes->added[changes->added_count++] = key;
 	}
 	closedir(dirp);
 	free(full_path);
 
 	if (skipped_symlinks > 0) {
-		log_message(LOG_DEBUG, "Skipped %d symlinks in %s (performance optimization)",
-					skipped_symlinks, path);
+		log_message(LOG_DEBUG, "Skipped %d symlinks in %s", skipped_symlinks, path);
 	}
+
 	if (skipped_unknown > 0) {
 		log_message(LOG_WARNING, "Encountered %d entries with DT_UNKNOWN in %s",
 					skipped_unknown, path);
 	}
 
-	/* Return true only if structure changed and no errors occurred */
-	return changed && success;
+	return changed;
 }
 
-/* Processes deleted directories and updates the cache */
-static bool dircache_reap(cached_dir_t *dir, khash_t(str_set) * unseen, dir_changes_t *changes) {
-	if (!unseen || kh_size(unseen) == 0) {
-		return false;
-	}
-
-	log_message(LOG_DEBUG, "Detected %d deleted subdirectories", kh_size(unseen));
-
-	if (changes) {
-		/* Pre-allocate removed list if needed */
-		int required = changes->removed_count + kh_size(unseen);
-		if (required > changes->removed_capacity) {
-			const char **new_list =
-				realloc((void *) changes->removed, required * sizeof(char *));
-			if (!new_list) {
-				log_message(LOG_WARNING, "Failed to realloc for removed list");
-				/* Can't report deletions, but will still clean cache */
-			} else {
-				changes->removed = new_list;
-				changes->removed_capacity = required;
-			}
-		}
-	}
-
+/* Reaps directories that were not marked in the current generation */
+static bool dircache_reap(cached_dir_t *dir, dir_changes_t *changes) {
+	bool changed = false;
 	khint_t k;
-	for (k = kh_begin(unseen); k != kh_end(unseen); ++k) {
-		if (!kh_exist(unseen, k)) {
+
+	/* Iterate over all subdirectories */
+	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs);) {
+		if (!kh_exist(dir->subdirs, k)) {
+			++k;
 			continue;
 		}
 
-		const char *key_to_del = kh_key(unseen, k);
+		/* If generation doesn't match, it wasn't seen in the last sweep */
+		if (kh_value(dir->subdirs, k) != dir->generation) {
+			const char *key_to_del = kh_key(dir->subdirs, k);
 
-		/* Track removed directory for caller by creating a copy */
-		if (changes && changes->removed_count < changes->removed_capacity) {
-			char *key_copy = strdup(key_to_del);
-			if (key_copy) {
-				changes->removed[changes->removed_count++] = key_copy;
-			} else {
-				log_message(LOG_WARNING, "Failed to copy key for removed list entry");
-				/* Not a fatal error, but the caller won't know about this deletion */
+			if (changes) {
+				/* Grow removed list if needed */
+				if (changes->removed_count >= changes->removed_capacity) {
+					int new_cap = changes->removed_capacity == 0 ? 16 : changes->removed_capacity * 2;
+					const char **new_list = realloc((void *) changes->removed, new_cap * sizeof(char *));
+					if (!new_list) {
+						log_message(LOG_WARNING, "Failed to realloc - deletion not reported");
+						/* We still remove it from cache to keep cache clean, but monitor won't know. */
+					} else {
+						changes->removed = new_list;
+						changes->removed_capacity = new_cap;
+					}
+				}
+
+				if (changes->removed_count < changes->removed_capacity) {
+					char *key_copy = strdup(key_to_del);
+					if (key_copy) {
+						changes->removed[changes->removed_count++] = key_copy;
+					}
+				}
 			}
-		}
 
-		khint_t main_k = kh_get(str_set, dir->subdirs, key_to_del);
-		if (main_k != kh_end(dir->subdirs)) {
-			free((void *) kh_key(dir->subdirs, main_k));
-			kh_del(str_set, dir->subdirs, main_k);
+			/* Remove from hash */
+			free((void *) key_to_del);
+			kh_del(subdir_map, dir->subdirs, k);
+			changed = true;
 		}
+		++k;
 	}
 
-	return true;
+	return changed;
 }
 
 /* Check if directory structure has changed and updates cache */
@@ -306,45 +264,38 @@ static bool dircache_sync(const char *path, cached_dir_t *dir, bool *changed, di
 		return false;
 	}
 
-	/* Mark: Create a set of existing keys to find deletions later */
-	khash_t(str_set) *unseen = dircache_mark(dir);
-
-	/* Ensure the primary subdirs hash set exists */
+	/* Ensure the primary subdirs hash map exists */
 	if (!dir->subdirs) {
-		dir->subdirs = kh_init(str_set);
+		dir->subdirs = kh_init(subdir_map);
 		if (!dir->subdirs) {
-			log_message(LOG_ERR, "Failed to create subdirectory hash set");
-			kh_destroy(str_set, unseen);
+			log_message(LOG_ERR, "Failed to create subdirectory hash map");
 			return false;
 		}
 	}
 
-	/* Sweep: Scan disk for new/existing dirs */
-	bool added = dircache_sweep(path, dir, unseen, changes);
+	/* Increment generation for this sync */
+	dir->generation++;
 
-	/* Reap: Process dirs that were marked but not swept */
-	bool removed = dircache_reap(dir, unseen, changes);
+	/* Sweep: Scan disk for new/existing dirs, marking them with current generation */
+	bool added = dircache_sweep(path, dir, changes);
 
-	kh_destroy(str_set, unseen);
+	/* Reap: Remove dirs that have old generation */
+	bool removed = dircache_reap(dir, changes);
 
 	*changed = added || removed;
 
 	if (*changed) {
-		log_message(LOG_DEBUG, "Directory structure in %s has changed, cache updated", path);
-	} else {
-		log_message(LOG_DEBUG, "Directory structure in %s unchanged", path);
+		log_message(LOG_DEBUG, "Directory structure in %s has changed", path);
 	}
 
 	/* Check if directory was modified during scan */
 	end_mtime = dircache_mtime(path);
 	if (end_mtime != start_mtime) {
-		log_message(LOG_DEBUG, "Directory %s modified during scan (mtime %ld -> %ld), forcing refresh",
-					path, start_mtime, end_mtime);
+		log_message(LOG_DEBUG, "Directory %s modified during scan, forcing refresh", path);
 		*changed = true;
 	}
 
 	dir->validated = true;
-	/* Ensure next refresh catches any changes that occurred during this scan */
 	dir->mtime = start_mtime;
 
 	return true;
@@ -362,6 +313,7 @@ static bool dircache_add(const char *path, bool *changed, dir_changes_t *changes
 	dir->mtime = 0;
 	dir->subdirs = NULL;
 	dir->validated = false;
+	dir->generation = 0;
 
 	/* Add to hash table */
 	char *key_copy = strdup(path); /* Must allocate a copy for the key */
@@ -383,7 +335,10 @@ static bool dircache_add(const char *path, bool *changed, dir_changes_t *changes
 
 	/* Check and update directory structure */
 	if (!dircache_sync(path, dir, changed, changes)) {
-		/* The entry will be cleaned up during dircache_cleanup */
+		/* Clean up on failure to avoid stale cache entries */
+		kh_del(dir_cache, cache_hash, k);
+		free(key_copy);
+		free(dir);
 		return false;
 	}
 
@@ -434,9 +389,9 @@ bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes) {
 }
 
 /* Get subdirectories from cache */
-const char **dircache_subdirs(const char *path, int *count) {
+char **dircache_subdirs(const char *path, int *count) {
 	cached_dir_t *dir;
-	const char **subdirs_array;
+	char **subdirs_array;
 
 	*count = 0;
 
@@ -447,35 +402,50 @@ const char **dircache_subdirs(const char *path, int *count) {
 	}
 
 	/* If no subdirectories, return NULL */
-	*count = kh_size(dir->subdirs);
-	if (*count == 0) {
+	int size = kh_size(dir->subdirs);
+	if (size == 0) {
 		return NULL;
 	}
 
-	/* Allocate array of strings */
-	subdirs_array = malloc(*count * sizeof(char *));
+	/* Allocate array of strings (plus one for NULL terminator) */
+	subdirs_array = malloc((size + 1) * sizeof(char *));
 	if (!subdirs_array) {
 		log_message(LOG_ERR, "Failed to allocate memory for subdirectory list");
-		*count = 0;
 		return NULL;
 	}
 
-	/* Fill array with pointers to subdirectory paths */
+	/* Fill array with copies of subdirectory paths */
 	int i = 0;
 	khint_t k;
 	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
 		if (!kh_exist(dir->subdirs, k)) {
 			continue;
 		}
-		subdirs_array[i++] = kh_key(dir->subdirs, k);
+		subdirs_array[i] = strdup(kh_key(dir->subdirs, k));
+		if (!subdirs_array[i]) {
+			log_message(LOG_ERR, "Failed to duplicate subdirectory string");
+			/* Cleanup partial allocation */
+			for (int j = 0; j < i; j++) {
+				free(subdirs_array[j]);
+			}
+			free(subdirs_array);
+			return NULL;
+		}
+		i++;
 	}
+	subdirs_array[i] = NULL; /* NULL terminate */
+	*count = i;
 
 	return subdirs_array;
 }
 
 /* Free subdirectory list */
-void dircache_free(const char **subdirs) {
+void dircache_free(char **subdirs) {
 	if (!subdirs) return;
+
+	for (int i = 0; subdirs[i] != NULL; i++) {
+		free(subdirs[i]);
+	}
 	free(subdirs);
 }
 

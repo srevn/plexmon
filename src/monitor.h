@@ -3,6 +3,7 @@
 
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #define INITIAL_MONITOR_CAPACITY 256       /* Initial size for monitored directories array */
@@ -20,6 +21,7 @@ typedef struct {
 	int section_id;                        /* Associated Plex library section ID */
 	dev_t device;                          /* Device ID for path validation */
 	ino_t inode;                           /* Inode number for path validation */
+	uint32_t uid;                          /* Unique generation ID to prevent race conditions */
 	int next_free;                         /* For free-list management of the directories array */
 } monitored_dir_t;
 

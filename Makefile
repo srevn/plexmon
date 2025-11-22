@@ -1,7 +1,7 @@
 # Makefile for plexmon
 
 CC = cc
-CFLAGS = -I/usr/local/include -Wall -Wextra -g -o2
+CFLAGS = -I/usr/local/include -Wall -Wextra -g -o2 -flto
 LDFLAGS = -L/usr/local/lib -lcurl -ljson-c
 
 # Source and header files

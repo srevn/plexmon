@@ -21,12 +21,13 @@ KHASH_MAP_INIT_STR(mon_dir, int) /* Hash map from string to monitored_dir_t inde
 
 /* Static variables for monitor implementation */
 static monitored_dir_t *monitored_dirs = NULL; /* Dynamic array of monitored directories */
-static int dirs_capacity = 0;				   /* Current capacity of the array */
-static int active_count = 0;				   /* Number of active directories */
-static int free_head = -1;					   /* Head of the free list for empty slots */
-static khash_t(mon_dir) * dirs_hash;		   /* Hash table for fast path lookups */
-static int kqueue_fd = -1;					   /* Global kqueue descriptor */
-uintptr_t user_event = 0;					   /* Global user event identifier */
+static int dirs_capacity = 0;                  /* Current capacity of the array */
+static int active_count = 0;                   /* Number of active directories */
+static int free_head = -1;                     /* Head of the free list for empty slots */
+static uint32_t monitor_uid_counter = 0;       /* Counter for unique directory generation IDs */
+static khash_t(mon_dir) * dirs_hash;           /* Hash table for fast path lookups */
+static int kqueue_fd = -1;                     /* Global kqueue descriptor */
+uintptr_t user_event = 0;                      /* Global user event identifier */
 
 /* Helper function to find a monitored directory by its path */
 static int path_monitored(const char *path) {
@@ -350,6 +351,7 @@ int monitor_add(const char *path, int section_id) {
 
 	/* Add to monitored directories array */
 	new_dir->fd = fd;
+	new_dir->uid = ++monitor_uid_counter;
 	new_dir->path = kh_key(dirs_hash, k);
 	new_dir->section_id = section_id;
 	new_dir->device = dir_stat.st_dev;
@@ -375,11 +377,15 @@ int monitor_add(const char *path, int section_id) {
 
 /* Handle directory events */
 static void monitor_event(monitored_dir_t *md, int fflags) {
-	log_message(LOG_INFO, "Change detected in directory: %s (flags: 0x%x)", md->path, fflags);
+	/* Capture stable values before potential realloc of monitored_dirs */
+	const char *path = md->path;
+	int section_id = md->section_id;
+
+	log_message(LOG_INFO, "Change detected in directory: %s (flags: 0x%x)", path, fflags);
 
 	/* Check for new subdirectories that need to be monitored */
-	if (!is_directory(md->path, D_TYPE_UNAVAILABLE)) {
-		events_handle(md->path, md->section_id);
+	if (!is_directory(path, D_TYPE_UNAVAILABLE)) {
+		events_handle(path, section_id);
 		return;
 	}
 
@@ -387,10 +393,10 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 	dir_changes_t changes = { 0 };
 
 	/* Directory cache with mtime checking and change tracking */
-	if (dircache_refresh(md->path, &dir_changed, &changes)) {
+	if (dircache_refresh(path, &dir_changed, &changes)) {
 		if (dir_changed) {
 			log_message(LOG_DEBUG, "Structure changed in %s, processing changes",
-						md->path);
+						path);
 
 			/* Process removed directories first */
 			if (changes.removed_count > 0) {
@@ -410,31 +416,29 @@ static void monitor_event(monitored_dir_t *md, int fflags) {
 							changes.added_count);
 				int added_count = 0;
 				for (int i = 0; i < changes.added_count; i++) {
-					if (monitor_add(changes.added[i], md->section_id) >= 0) {
+					if (monitor_add(changes.added[i], section_id) >= 0) {
 						added_count++;
 					}
 				}
 				if (added_count > 0) {
 					log_message(LOG_DEBUG, "Successfully registered %d new directories under %s",
-								added_count, md->path);
+								added_count, path);
 				}
 			}
 
 			changes_free(&changes);
 		} else {
 			/* Still queue a Plex scan but skip directory tree rescanning */
-			log_message(LOG_DEBUG, "File change detected in %s, skip directory rescan",
-						md->path);
+			log_message(LOG_DEBUG, "File change detected in %s, skip directory rescan", path);
 		}
 	} else {
 		/* Cache check failed, fall back to targeted refresh */
-		log_message(LOG_WARNING, "Failed to check cache for %s, using targeted refresh",
-					md->path);
-		monitor_tree(md->path, md->section_id);
+		log_message(LOG_WARNING, "Failed to check cache for %s, using targeted refresh", path);
+		monitor_tree(path, section_id);
 	}
 
 	/* Queue event */
-	events_handle(md->path, md->section_id);
+	events_handle(path, section_id);
 }
 
 /* Process events from kqueue */
@@ -579,7 +583,7 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
-		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
+		char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (subdirs) {
 			/* Enqueue all found subdirectories for the next iteration */

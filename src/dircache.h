@@ -2,16 +2,18 @@
 #define DIRCACHE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
 
 #include "../lib/khash.h"
 
-KHASH_SET_INIT_STR(str_set)            /* Define a hash set of strings */
+KHASH_MAP_INIT_STR(subdir_map, uint32_t) /* Define a hash map of strings to integers (generation IDs) */
 
 /* Structure to represent a cached directory with metadata */
 typedef struct cached_dir {
 	time_t mtime;                      /* Last modification time from stat() */
-	khash_t(str_set) * subdirs;        /* Hash set of subdirectories for fast lookups */
+	khash_t(subdir_map) * subdirs;     /* Hash map of subdirectories for fast lookups */
+	uint32_t generation;               /* Generation counter for mark-and-sweep */
 	bool validated;                    /* Whether the cache entry is up-to-date */
 } cached_dir_t;
 
@@ -31,8 +33,8 @@ void dircache_cleanup(void);
 
 /* Directory cache operations */
 bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes);
-const char **dircache_subdirs(const char *path, int *count);
-void dircache_free(const char **subdirs);
+char **dircache_subdirs(const char *path, int *count);
+void dircache_free(char **subdirs);
 void changes_free(dir_changes_t *changes);
 
 #endif /* DIRCACHE_H */
