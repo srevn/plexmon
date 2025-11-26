@@ -66,7 +66,7 @@ static int pending_parent(const char *path) {
 		/* Check if this is a parent directory of our path */
 		if (parent_len < path_len &&
 			strncmp(pending[i].path, path, parent_len) == 0 &&
-			(path[parent_len] == '/' || path[parent_len] == '\0')) {
+			path[parent_len] == '/') {
 			return i;
 		}
 	}
@@ -88,7 +88,7 @@ static void pending_child(const char *path, int *child_indices, int *num_childre
 		/* Check if this is a child directory of our path */
 		if (path_len < child_len &&
 			strncmp(path, pending[i].path, path_len) == 0 &&
-			(pending[i].path[path_len] == '/' || pending[i].path[path_len] == '\0')) {
+			pending[i].path[path_len] == '/') {
 			child_indices[*num_children] = i;
 			(*num_children)++;
 		}
