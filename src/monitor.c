@@ -215,6 +215,7 @@ void monitor_remove(int index) {
 				kh_del(mon_dir, dirs_hash, k);
 			}
 		}
+		dir->path = NULL; /* Prevent dangling pointer access */
 
 		/* Add to free list */
 		dir->next_free = free_head;
@@ -583,20 +584,20 @@ bool monitor_tree(const char *dir_path, int section_id) {
 
 		/* Get subdirectories from the now-warm cache */
 		int subdir_count = 0;
-		char **subdirs = dircache_subdirs(current_path, &subdir_count);
+		const char **subdirs = dircache_subdirs(current_path, &subdir_count);
 
 		if (subdirs) {
 			/* Enqueue all found subdirectories for the next iteration */
 			for (int i = 0; i < subdir_count; i++) {
 				if (!queue_enqueue(&queue, subdirs[i])) {
 					log_message(LOG_ERR, "Failed to allocate memory for directory queue");
-					dircache_free(subdirs);
+					dircache_release(subdirs);
 					free(node);
 					queue_free(&queue);
 					return false;
 				}
 			}
-			dircache_free(subdirs);
+			dircache_release(subdirs);
 		}
 
 		/* After processing the root, all subsequent are subdirectories */

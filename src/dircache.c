@@ -399,10 +399,9 @@ bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes) {
 	return true;
 }
 
-/* Get subdirectories from cache */
-char **dircache_subdirs(const char *path, int *count) {
+/* Get subdirectories as borrowed pointers (zero-copy) */
+const char **dircache_subdirs(const char *path, int *count) {
 	cached_dir_t *dir;
-	char **subdirs_array;
 
 	*count = 0;
 
@@ -418,46 +417,30 @@ char **dircache_subdirs(const char *path, int *count) {
 		return NULL;
 	}
 
-	/* Allocate array of strings (plus one for NULL terminator) */
-	subdirs_array = malloc((size + 1) * sizeof(char *));
+	/* Allocate array only (not strings) */
+	const char **subdirs_array = malloc((size + 1) * sizeof(const char *));
 	if (!subdirs_array) {
-		log_message(LOG_ERR, "Failed to allocate memory for subdirectory list");
+		log_message(LOG_ERR, "Failed to allocate subdirectory array");
 		return NULL;
 	}
 
-	/* Fill array with copies of subdirectory paths */
+	/* Fill array with direct pointers to cache-owned strings */
 	int i = 0;
 	khint_t k;
 	for (k = kh_begin(dir->subdirs); k != kh_end(dir->subdirs); ++k) {
-		if (!kh_exist(dir->subdirs, k)) {
-			continue;
+		if (kh_exist(dir->subdirs, k)) {
+			subdirs_array[i++] = kh_key(dir->subdirs, k);
 		}
-		subdirs_array[i] = strdup(kh_key(dir->subdirs, k));
-		if (!subdirs_array[i]) {
-			log_message(LOG_ERR, "Failed to duplicate subdirectory string");
-			/* Cleanup partial allocation */
-			for (int j = 0; j < i; j++) {
-				free(subdirs_array[j]);
-			}
-			free(subdirs_array);
-			return NULL;
-		}
-		i++;
 	}
-	subdirs_array[i] = NULL; /* NULL terminate */
+	subdirs_array[i] = NULL;
 	*count = i;
 
 	return subdirs_array;
 }
 
-/* Free subdirectory list */
-void dircache_free(char **subdirs) {
-	if (!subdirs) return;
-
-	for (int i = 0; subdirs[i] != NULL; i++) {
-		free(subdirs[i]);
-	}
-	free(subdirs);
+/* Release a subdirectory array */
+void dircache_release(const char **subdirs) {
+	free((void *) subdirs);
 }
 
 /* Free directory changes structure */

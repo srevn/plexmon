@@ -33,8 +33,8 @@ void dircache_cleanup(void);
 
 /* Directory cache operations */
 bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes);
-char **dircache_subdirs(const char *path, int *count);
-void dircache_free(char **subdirs);
+const char **dircache_subdirs(const char *path, int *count);
+void dircache_release(const char **subdirs);
 void changes_free(dir_changes_t *changes);
 
 #endif /* DIRCACHE_H */
