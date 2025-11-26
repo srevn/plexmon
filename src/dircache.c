@@ -91,6 +91,7 @@ static bool dircache_sweep(const char *path, cached_dir_t *dir, dir_changes_t *c
 
 	int skipped_symlinks = 0;
 	int skipped_unknown = 0;
+	bool path_copied = false; /* Track if path prefix is in buffer */
 
 	if (!(dirp = opendir(path))) {
 		log_message(LOG_ERR, "Failed to open directory %s: %s", path, strerror(errno));
@@ -125,8 +126,16 @@ static bool dircache_sweep(const char *path, cached_dir_t *dir, dir_changes_t *c
 			}
 			full_path = new_buf;
 			full_path_cap = required_len;
+			/* Note: realloc preserves existing content, path_copied stays valid */
 		}
-		sprintf(full_path, "%s/%s", path, entry->d_name);
+		/* Copy path prefix once; realloc preserves it on subsequent grows */
+		if (!path_copied) {
+			memcpy(full_path, path, path_len);
+			full_path[path_len] = '/';
+			path_copied = true;
+		}
+		/* Only the entry name varies per iteration */
+		memcpy(full_path + path_len + 1, entry->d_name, name_len + 1);
 
 		if (!is_directory(full_path, entry->d_type)) {
 			continue;
@@ -355,8 +364,10 @@ bool dircache_refresh(const char *path, bool *changed, dir_changes_t *changes) {
 	if (changes) {
 		changes->added = NULL;
 		changes->added_count = 0;
+		changes->added_capacity = 0;
 		changes->removed = NULL;
 		changes->removed_count = 0;
+		changes->removed_capacity = 0;
 	}
 
 	/* Get current mtime */
