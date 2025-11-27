@@ -224,27 +224,6 @@ void monitor_remove(int index) {
 	}
 }
 
-/* Helper function to check if a directory is already monitored and still valid */
-bool monitor_validate(const char *path) {
-	int index = path_monitored(path);
-	if (index == -1) {
-		return false;
-	}
-
-	monitored_dir_t *dir = &monitored_dirs[index];
-
-	/* Verify the directory still exists and is the same */
-	struct stat path_stat;
-	if (dir->fd >= 0 && stat(path, &path_stat) == 0 &&
-		path_stat.st_dev == dir->device && path_stat.st_ino == dir->inode) {
-		return true;
-	}
-
-	/* Directory was deleted/recreated or fd is invalid, remove from monitoring */
-	monitor_remove(index);
-	return false;
-}
-
 /* Register a directory with kqueue */
 static bool monitor_register(int fd, monitored_dir_t *dir_info) {
 	struct kevent change;

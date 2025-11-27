@@ -40,7 +40,6 @@ int monitor_kqueue(void);
 int monitor_add(const char *path, int section_id);
 void monitor_remove(int index);
 int monitor_count(void);
-bool monitor_validate(const char *path);
 bool monitor_tree(const char *dir_path, int section_id);
 
 #endif /* MONITOR_H */
